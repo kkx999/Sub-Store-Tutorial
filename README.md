@@ -35,7 +35,7 @@ xream/sub-store
 ```
 curl https://get.acme.sh | sh
 ```
-自行更换代码中的域名、邮箱为你解析的域名及邮箱
+自行更换代码中的xxxxxxx.com域名、邮箱为你解析的域名及邮箱
 ```
 ~/.acme.sh/acme.sh --register-account -m xxxx@xxxx.com
 ```
