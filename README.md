@@ -1,5 +1,6 @@
 # Sub-Store搭建
 来源 [Sub-Store](https://github.com/sub-store-org/Sub-Store)
+
 随机密码生成  [1Password](https://1password.com/zh-cn/password-generator)
 
 ## 第1步  先更新系统源以及安装必要指令
