@@ -17,6 +17,7 @@ curl -fsSL https://get.docker.com | bash -s docker
 ```
 ### 安装Docker完成后再复制一下内容执行
 注意⚠️127.0.0.1:xxxx改为你想要的数字也可以默认
+
 -e SUB_STORE_FRONTEND_BACKEND_PATH=/xxxxxx随机去成20位密码
 ```
 docker run -it -d \
