@@ -1,2 +1,1 @@
-# Sub-Store-Tutorial
-Sub-Store搭建教程
+# Sub-Store搭建教
