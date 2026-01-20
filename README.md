@@ -169,3 +169,5 @@ sub-store优化脚本
 ```
  https://github.geekery.cn/raw.githubusercontent.com/Keywos/rule/main/rename.js
 ```
+订阅转换
+[边缘转换](https://bianyuan.xyz)
