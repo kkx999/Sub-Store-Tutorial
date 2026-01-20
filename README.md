@@ -158,7 +158,6 @@ sudo nginx -t
 然后重启 Nginx
 ```
 sudo systemctl restart nginx
-
 ```
 ##  搭建完成
 
