@@ -1,4 +1,5 @@
-# Sub-Store搭建教
+# Sub-Store搭建
+来源 [Sub-Store](https://github.com/sub-store-org/Sub-Store)
 
 ## 第1步  先更新系统源以及安装必要指令
 ```
