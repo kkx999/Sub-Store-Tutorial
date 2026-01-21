@@ -66,17 +66,15 @@ sudo mkdir -p /etc/nginx/ssl
 
 127.0.0.1:xxxx改为你自己设置的端口 默认的话保持不动就行了
 ```
-user www-data;  # 如果你的系统用户不是 www-data，这里可能需要改为 root 或 nginx
+user www-data;
 worker_processes auto;
 pid /run/nginx.pid;
 
-# 必须有的 events 块
 events {
     worker_connections 768;
     # multi_accept on;
 }
 
-# 必须有的 http 块，所有的网站配置都在这里面
 http {
 
     ##
@@ -88,12 +86,11 @@ http {
     keepalive_timeout 65;
     types_hash_max_size 2048;
 
-    # MIME 类型设置 (确保网页样式加载正常)
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
 
     ##
-    # SSL 全局设置
+    # SSL 设置
     ##
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_prefer_server_ciphers on;
@@ -105,36 +102,51 @@ http {
     error_log /var/log/nginx/error.log;
 
     ##
-    # Gzip 压缩 (可选，为了速度可以开启)
+    # Gzip 压缩
     ##
     gzip on;
 
     # =================================================
-    # 下面是你的 Sub-Store 规则配置
+    # Sub-Store 核心配置
     # =================================================
 
     server {
-        listen 443 ssl http2;
+        # 新写法：http2 单独开启，消除 [warn] 警告
+        listen 443 ssl;
+        http2 on;
+        
         server_name XXXXXXX.COM; 
 
-        # 证书路径 (你刚才安装好的路径)
+        # 证书路径
         ssl_certificate /etc/nginx/ssl/XXXXXXX.COM.cer;      
         ssl_certificate_key /etc/nginx/ssl/XXXXXXX.COM.key;  
 
+        # SSL 安全参数
         ssl_session_timeout 1d;
         ssl_session_cache shared:SSL:50m;
         ssl_session_tickets off;
         ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384';
         
         location / {
+            # === 这里修正为 3001 端口 ===
             proxy_pass http://127.0.0.1:3001; 
+            
+            # 标准代理头
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
+            
+            # WebSocket 支持
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";
+            
+            # === 强制禁止缓存 (解决节点删不掉的问题) ===
+            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0";
+            add_header Pragma "no-cache";
+            add_header Expires "0";
+            
             proxy_buffering off;
         }
     }
