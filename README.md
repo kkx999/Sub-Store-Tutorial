@@ -142,7 +142,7 @@ http {
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";
             
-            # === 强制禁止缓存 (解决节点删不掉的问题) ===
+            # === 强制禁止缓存 ===
             add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0";
             add_header Pragma "no-cache";
             add_header Expires "0";
