@@ -111,9 +111,8 @@ http {
     # =================================================
 
     server {
-        # 新写法：http2 单独开启，消除 [warn] 警告
-        listen 443 ssl;
-        http2 on;
+        
+        listen 443 ssl http2;
         
         server_name XXXXXXX.COM; 
 
