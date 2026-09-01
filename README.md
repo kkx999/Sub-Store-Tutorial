@@ -55,16 +55,10 @@ Zone / Zone / Read
 
 # 一键部署
 
-当前版本位于测试分支：
-
-```text
-update/deployment-guide-2026
-```
-
 全新 Debian / Ubuntu 服务器直接执行：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/update/deployment-guide-2026/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/main/install.sh)
 ```
 
 以后部署第二套、第三套，**还是执行完全相同的这一条命令**。
@@ -123,7 +117,7 @@ https://sub1.example.com?api=https://sub1.example.com/abc123
 **再次执行同一条命令：**
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/update/deployment-guide-2026/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/main/install.sh)
 ```
 
 脚本检测到第一套已经存在后，会自动变成：
