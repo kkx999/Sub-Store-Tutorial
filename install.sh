@@ -1,6 +1,41 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+STATE_DIR="/etc/sub-store-installer"
+EMAIL_FILE="$STATE_DIR/acme-email"
+TOKEN_FILE="$STATE_DIR/cloudflare-token"
+SUCCESS=0
+CREATED_CONTAINER=0
+CREATED_DATA_DIR=0
+CREATED_NGINX=0
+INSTANCE_NAME=""
+DATA_DIR=""
+NGINX_SITE=""
+NGINX_LINK=""
+CF_Token=""
+CF_Zone_ID=""
+
+cleanup() {
+  local rc=$?
+  unset CF_Token CF_Zone_ID 2>/dev/null || true
+
+  if [ "$SUCCESS" -ne 1 ]; then
+    if [ "$CREATED_NGINX" -eq 1 ]; then
+      rm -f "$NGINX_LINK" "$NGINX_SITE" 2>/dev/null || true
+      nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+    fi
+    if [ "$CREATED_CONTAINER" -eq 1 ] && [ -n "$INSTANCE_NAME" ]; then
+      docker rm -f "$INSTANCE_NAME" >/dev/null 2>&1 || true
+    fi
+    if [ "$CREATED_DATA_DIR" -eq 1 ] && [ -n "$DATA_DIR" ]; then
+      rm -rf "$DATA_DIR" 2>/dev/null || true
+    fi
+  fi
+
+  return "$rc"
+}
+trap cleanup EXIT
+
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
   echo "请使用 root 用户运行此脚本。"
   exit 1
@@ -11,11 +46,7 @@ if ! command -v apt >/dev/null 2>&1; then
   exit 1
 fi
 
-STATE_DIR="/etc/sub-store-installer"
-EMAIL_FILE="$STATE_DIR/acme-email"
-TOKEN_FILE="$STATE_DIR/cloudflare-token"
-
-cat <<'EOF'
+cat <<'EOF_BANNER'
 ========================================
         Sub-Store 一键部署脚本
 ========================================
@@ -28,7 +59,7 @@ cat <<'EOF'
 你只需要填写：
 - 后端访问路径
 - 域名
-- Cloudflare API Token（可选择沿用之前的）
+- Cloudflare API Token（已有 Token 时可选择沿用或输入新的）
 
 第一次部署还会询问一次证书邮箱。
 
@@ -36,29 +67,26 @@ cat <<'EOF'
 - 域名已经托管到 Cloudflare
 - 域名 A 记录已经指向本机公网 IPv4
 - Cloudflare API Token 具有：Zone / DNS / Edit、Zone / Zone / Read
-EOF
+EOF_BANNER
 
 echo
-echo "[1/7] 安装系统依赖..."
+echo "[1/8] 安装系统依赖..."
 apt update -y
-DEBIAN_FRONTEND=noninteractive apt install -y curl ca-certificates cron nginx iproute2 jq
+DEBIAN_FRONTEND=noninteractive apt install -y curl ca-certificates openssl cron nginx iproute2 jq tar
 systemctl enable --now cron nginx
 
-echo "[2/7] 检查 Docker..."
+echo "[2/8] 检查 Docker..."
 if ! command -v docker >/dev/null 2>&1; then
   curl -fsSL https://get.docker.com | bash -s docker
 fi
 systemctl enable --now docker
 
-# 自动寻找下一套可用实例。
 INSTANCE_NUMBER=1
 while true; do
   if [ "$INSTANCE_NUMBER" -eq 1 ]; then
     INSTANCE_NAME="sub-store"
-    HOST_PORT=3001
   else
     INSTANCE_NAME="sub-store-$INSTANCE_NUMBER"
-    HOST_PORT=$((3000 + INSTANCE_NUMBER))
   fi
 
   DATA_DIR="/etc/$INSTANCE_NAME"
@@ -66,21 +94,30 @@ while true; do
 
   INSTANCE_BUSY=0
   docker inspect "$INSTANCE_NAME" >/dev/null 2>&1 && INSTANCE_BUSY=1
-  [ -e "$DATA_DIR" ] && INSTANCE_BUSY=1
   [ -e "$NGINX_SITE" ] && INSTANCE_BUSY=1
-  ss -lntH | awk '{print $4}' | grep -Eq "(^|:)$HOST_PORT$" && INSTANCE_BUSY=1
-
-  if [ "$INSTANCE_BUSY" -eq 0 ]; then
-    break
+  if [ -d "$DATA_DIR" ] && [ -n "$(find "$DATA_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+    INSTANCE_BUSY=1
+  elif [ -e "$DATA_DIR" ] && [ ! -d "$DATA_DIR" ]; then
+    INSTANCE_BUSY=1
   fi
 
+  [ "$INSTANCE_BUSY" -eq 0 ] && break
   INSTANCE_NUMBER=$((INSTANCE_NUMBER + 1))
+done
+
+HOST_PORT=$((3000 + INSTANCE_NUMBER))
+while ss -lntH | awk '{print $4}' | grep -Eq "(^|:)$HOST_PORT$"; do
+  HOST_PORT=$((HOST_PORT + 1))
+  if [ "$HOST_PORT" -gt 65535 ]; then
+    echo "没有找到可用的本机端口。"
+    exit 1
+  fi
 done
 
 NGINX_LINK="/etc/nginx/sites-enabled/$INSTANCE_NAME"
 SSL_DIR="/etc/nginx/ssl"
 
-cat <<EOF
+cat <<EOF_INFO
 
 ----------------------------------------
 检测到本次将部署第 $INSTANCE_NUMBER 套 Sub-Store
@@ -90,16 +127,16 @@ cat <<EOF
 本机端口：$HOST_PORT
 数据目录：$DATA_DIR
 ----------------------------------------
-EOF
+EOF_INFO
 
-read -rp "请输入后端访问路径（例如 my-path）: " SUB_PATH
+read -rp "请输入后端访问路径（仅字母、数字、-、_）: " SUB_PATH
 SUB_PATH="${SUB_PATH#/}"
 if [ -z "$SUB_PATH" ]; then
   echo "后端访问路径不能为空。"
   exit 1
 fi
-if [[ ! "$SUB_PATH" =~ ^[A-Za-z0-9._~/-]+$ ]]; then
-  echo "后端访问路径包含不支持的字符。建议只使用字母、数字、点、下划线、短横线或 /。"
+if [[ ! "$SUB_PATH" =~ ^[A-Za-z0-9_-]+$ ]]; then
+  echo "后端访问路径格式不正确，只能使用字母、数字、短横线 - 和下划线 _。"
   exit 1
 fi
 SUB_PATH="/$SUB_PATH"
@@ -109,20 +146,19 @@ DOMAIN="${DOMAIN,,}"
 DOMAIN="${DOMAIN#http://}"
 DOMAIN="${DOMAIN#https://}"
 DOMAIN="${DOMAIN%%/*}"
-if [[ ! "$DOMAIN" =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$ ]]; then
+if [[ ! "$DOMAIN" =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
   echo "域名格式不正确。"
   exit 1
 fi
 
-if grep -RqsE "^[[:space:]]*server_name[[:space:]]+$DOMAIN([[:space:];]|$)" /etc/nginx/sites-enabled 2>/dev/null; then
-  echo "域名 $DOMAIN 已经存在于 Nginx 配置中，为避免冲突已停止部署。"
+if nginx -T 2>&1 | grep -Eq "^[[:space:]]*server_name[[:space:]]+$DOMAIN([[:space:];]|$)"; then
+  echo "域名 $DOMAIN 已经存在于当前 Nginx 配置中，为避免冲突已停止部署。"
   exit 1
 fi
 
 mkdir -p "$STATE_DIR"
 chmod 700 "$STATE_DIR"
 
-# 第一次询问邮箱，以后自动沿用。
 if [ -s "$EMAIL_FILE" ]; then
   ACME_EMAIL="$(cat "$EMAIL_FILE")"
   echo "证书邮箱：$ACME_EMAIL（自动沿用）"
@@ -142,7 +178,6 @@ if [ -s "$TOKEN_FILE" ]; then
   echo "2) 输入新的 Token"
   read -rp "请选择 [1/2]: " TOKEN_CHOICE
   TOKEN_CHOICE="${TOKEN_CHOICE:-1}"
-
   case "$TOKEN_CHOICE" in
     1)
       CF_Token="$(cat "$TOKEN_FILE")"
@@ -166,7 +201,6 @@ if [ -z "$CF_Token" ]; then
   exit 1
 fi
 
-# 通过 Token 自动定位当前域名所属的 Cloudflare Zone。
 detect_cf_zone() {
   local token="$1"
   local candidate="$DOMAIN"
@@ -174,7 +208,7 @@ detect_cf_zone() {
   local zone_id=""
 
   while [[ "$candidate" == *.* ]]; do
-    response="$(curl -sS --connect-timeout 10 --max-time 20 \
+    response="$(curl -fsS --connect-timeout 10 --max-time 20 \
       -H "Authorization: Bearer $token" \
       -H "Content-Type: application/json" \
       "https://api.cloudflare.com/client/v4/zones?name=$candidate&per_page=1")" || return 1
@@ -185,10 +219,8 @@ detect_cf_zone() {
       CF_ZONE_NAME="$candidate"
       return 0
     fi
-
     candidate="${candidate#*.}"
   done
-
   return 1
 }
 
@@ -211,8 +243,9 @@ fi
 
 CERT_FILE="$SSL_DIR/$DOMAIN.cer"
 KEY_FILE="$SSL_DIR/$DOMAIN.key"
+HEALTH_URL="http://127.0.0.1:$HOST_PORT$SUB_PATH/api/utils/env"
 
-cat <<EOF
+cat <<EOF_CONFIRM
 
 ---------- 配置确认 ----------
 第几套：第 $INSTANCE_NUMBER 套
@@ -225,31 +258,69 @@ Cloudflare Zone：$CF_ZONE_NAME
 证书邮箱：$ACME_EMAIL
 Cloudflare Token：$TOKEN_SOURCE
 ------------------------------
-EOF
+EOF_CONFIRM
 
 read -rp "确认开始部署？[Y/n]: " CONFIRM
 CONFIRM="${CONFIRM:-Y}"
 if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
   echo "已取消。"
-  unset CF_Token CF_Zone_ID
   exit 0
 fi
 
-echo "[3/7] 安装并配置 acme.sh..."
+echo "[3/8] 安装并配置 acme.sh..."
 if [ ! -x /root/.acme.sh/acme.sh ]; then
-  curl https://get.acme.sh | sh -s "email=$ACME_EMAIL"
+  curl -fsSL https://get.acme.sh | sh -s "email=$ACME_EMAIL"
 fi
 /root/.acme.sh/acme.sh --set-default-ca --server letsencrypt
 
-# 首次保存邮箱。
 if [ ! -s "$EMAIL_FILE" ]; then
   printf '%s\n' "$ACME_EMAIL" > "$EMAIL_FILE"
   chmod 600 "$EMAIL_FILE"
 fi
 
-echo "[4/7] 使用 Cloudflare DNS API 申请证书..."
+echo "[4/8] 使用 Cloudflare DNS API 申请证书..."
 export CF_Token CF_Zone_ID
-/root/.acme.sh/acme.sh --issue --dns dns_cf -d "$DOMAIN" --keylength ec-256
+
+DOMAIN_CONF="/root/.acme.sh/${DOMAIN}_ecc/${DOMAIN}.conf"
+INTERNAL_CERT="/root/.acme.sh/${DOMAIN}_ecc/${DOMAIN}.cer"
+SAVED_CF_TOKEN=""
+SAVED_CF_ZONE_ID=""
+
+if [ -f "$DOMAIN_CONF" ]; then
+  SAVED_CF_TOKEN="$(sed -n "s/^CF_Token='\(.*\)'$/\1/p" "$DOMAIN_CONF" | head -n1)"
+  SAVED_CF_ZONE_ID="$(sed -n "s/^CF_Zone_ID='\(.*\)'$/\1/p" "$DOMAIN_CONF" | head -n1)"
+fi
+
+if [ -f "$DOMAIN_CONF" ] && { [ "$SAVED_CF_TOKEN" != "$CF_Token" ] || [ "$SAVED_CF_ZONE_ID" != "$CF_Zone_ID" ]; }; then
+  echo "检测到这个域名已经存在 acme.sh 证书记录，但保存的 Cloudflare 凭据与本次输入不同。"
+  echo "为避免错误覆盖已有证书续期凭据，本次部署已停止。"
+  echo "如果这是旧的无用证书记录，请先确认后再手动清理该域名的 acme.sh 记录。"
+  exit 1
+fi
+
+if [ -f "$DOMAIN_CONF" ] && [ -f "$INTERNAL_CERT" ] && openssl x509 -checkend 86400 -noout -in "$INTERNAL_CERT" >/dev/null 2>&1; then
+  echo "检测到已有有效证书且 Cloudflare 凭据一致，直接复用，不重复申请。"
+else
+  if [ -f "$DOMAIN_CONF" ]; then
+    echo "已有证书即将过期或不可用，正在强制续期..."
+    /root/.acme.sh/acme.sh --renew -d "$DOMAIN" --ecc --force
+  else
+    /root/.acme.sh/acme.sh --issue --dns dns_cf -d "$DOMAIN" --keylength ec-256
+  fi
+fi
+
+SAVED_CF_TOKEN=""
+SAVED_CF_ZONE_ID=""
+if [ -f "$DOMAIN_CONF" ]; then
+  SAVED_CF_TOKEN="$(sed -n "s/^CF_Token='\(.*\)'$/\1/p" "$DOMAIN_CONF" | head -n1)"
+  SAVED_CF_ZONE_ID="$(sed -n "s/^CF_Zone_ID='\(.*\)'$/\1/p" "$DOMAIN_CONF" | head -n1)"
+fi
+if [ ! -f "$DOMAIN_CONF" ] || [ "$SAVED_CF_TOKEN" != "$CF_Token" ] || [ "$SAVED_CF_ZONE_ID" != "$CF_Zone_ID" ]; then
+  echo "未能确认 Cloudflare 续期凭据已正确保存。"
+  echo "为避免证书到期后续期失败，本次部署已停止。"
+  echo "当前域名没有写入 Nginx，现有网站不会受影响。"
+  exit 1
+fi
 
 mkdir -p "$SSL_DIR"
 /root/.acme.sh/acme.sh --install-cert -d "$DOMAIN" --ecc \
@@ -257,16 +328,54 @@ mkdir -p "$SSL_DIR"
   --fullchain-file "$CERT_FILE" \
   --reloadcmd "systemctl reload nginx"
 
-# 证书申请成功后，把本次使用的 Token 保存为下次可选择的旧 Token。
 printf '%s' "$CF_Token" > "$TOKEN_FILE"
 chmod 600 "$TOKEN_FILE"
-
-# 因为同时传入了 CF_Zone_ID，acme.sh 会把 Token/Zone 信息保存到当前域名配置中，
-# 后续更换默认 Token 不会覆盖已经签发域名自己的续期凭据。
 unset CF_Token CF_Zone_ID
 
-echo "[5/7] 自动生成 Nginx 配置..."
-cat > "$NGINX_SITE" <<EOF
+echo "[5/8] 拉取 Sub-Store 镜像..."
+docker pull xream/sub-store
+
+if [ ! -e "$DATA_DIR" ]; then
+  mkdir -p "$DATA_DIR"
+  CREATED_DATA_DIR=1
+elif [ ! -d "$DATA_DIR" ]; then
+  echo "数据路径 $DATA_DIR 已存在但不是目录，已停止部署。"
+  exit 1
+elif [ -z "$(find "$DATA_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+  CREATED_DATA_DIR=1
+fi
+
+echo "[6/8] 启动 Sub-Store..."
+if ! docker run -d \
+  --restart=always \
+  -e "SUB_STORE_BACKEND_SYNC_CRON=55 23 * * *" \
+  -e "SUB_STORE_FRONTEND_BACKEND_PATH=$SUB_PATH" \
+  -p "127.0.0.1:$HOST_PORT:3001" \
+  -v "$DATA_DIR:/opt/app/data" \
+  --name "$INSTANCE_NAME" \
+  xream/sub-store; then
+  docker rm -f "$INSTANCE_NAME" >/dev/null 2>&1 || true
+  echo "Sub-Store 容器创建失败。"
+  exit 1
+fi
+CREATED_CONTAINER=1
+
+HEALTH_OK=0
+for _ in $(seq 1 30); do
+  if curl -fsS --max-time 5 "$HEALTH_URL" >/dev/null 2>&1; then
+    HEALTH_OK=1
+    break
+  fi
+  sleep 2
+done
+if [ "$HEALTH_OK" -ne 1 ]; then
+  echo "Sub-Store 后端健康检查失败：$HEALTH_URL"
+  docker logs --tail 100 "$INSTANCE_NAME" || true
+  exit 1
+fi
+
+echo "[7/8] 自动生成 Nginx 配置..."
+cat > "$NGINX_SITE" <<EOF_NGINX
 server {
     listen 80;
     server_name $DOMAIN;
@@ -295,48 +404,36 @@ server {
         proxy_set_header Connection "upgrade";
     }
 }
-EOF
-
+EOF_NGINX
 ln -sfn "$NGINX_SITE" "$NGINX_LINK"
+CREATED_NGINX=1
+
 if ! nginx -t; then
-  echo "Nginx 配置检查失败，已撤销本次新增的 Nginx 配置。"
-  rm -f "$NGINX_LINK" "$NGINX_SITE"
-  nginx -t || true
+  echo "Nginx 配置检查失败，本次新增内容会自动回滚。"
   exit 1
 fi
-
-echo "[6/7] 部署 Sub-Store..."
-docker pull xream/sub-store
-mkdir -p "$DATA_DIR"
-
-if ! docker run -d \
-  --restart=always \
-  -e "SUB_STORE_BACKEND_SYNC_CRON=55 23 * * *" \
-  -e "SUB_STORE_FRONTEND_BACKEND_PATH=$SUB_PATH" \
-  -p "127.0.0.1:$HOST_PORT:3001" \
-  -v "$DATA_DIR:/opt/app/data" \
-  --name "$INSTANCE_NAME" \
-  xream/sub-store; then
-  echo "Sub-Store 容器创建失败，已撤销本次 Nginx 配置。"
-  rm -f "$NGINX_LINK" "$NGINX_SITE"
-  nginx -t || true
-  exit 1
-fi
-
 systemctl reload nginx
 
-echo "[7/7] 检查服务..."
+echo "[8/8] 最终检查..."
 if ! docker ps --format '{{.Names}}' | grep -Fxq "$INSTANCE_NAME"; then
-  echo "Sub-Store 容器未处于运行状态，请执行："
-  echo "docker logs --tail 100 $INSTANCE_NAME"
+  echo "Sub-Store 容器未处于运行状态。"
+  docker logs --tail 100 "$INSTANCE_NAME" || true
+  exit 1
+fi
+if ! curl -fsS --max-time 10 "$HEALTH_URL" >/dev/null 2>&1; then
+  echo "最终后端健康检查失败。"
   exit 1
 fi
 
-if ! curl -fsS --max-time 10 "http://127.0.0.1:$HOST_PORT" >/dev/null 2>&1; then
-  echo "警告：本机端口 $HOST_PORT 暂时没有正常响应，请检查容器日志。"
+HTTPS_HEALTH_URL="https://$DOMAIN$SUB_PATH/api/utils/env"
+if ! curl -fsS --max-time 10 --resolve "$DOMAIN:443:127.0.0.1" "$HTTPS_HEALTH_URL" >/dev/null 2>&1; then
+  echo "Nginx HTTPS 健康检查失败：$HTTPS_HEALTH_URL"
+  exit 1
 fi
 
-cat <<EOF
+SUCCESS=1
+
+cat <<EOF_DONE
 
 ========================================
               部署完成
@@ -353,9 +450,7 @@ https://$DOMAIN?api=https://$DOMAIN$SUB_PATH
 以后要部署下一套：
 重新执行同一条安装命令即可，脚本会自动分配下一套。
 
-查看日志：
-docker logs -f -t --tail 100 $INSTANCE_NAME
-
-证书续期：acme.sh 已安装定时任务，当前域名会使用签发时保存的 Cloudflare 凭据自动续期。
+日常更新 / 备份 / 恢复 / 卸载：
+bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/main/manage.sh)
 ========================================
-EOF
+EOF_DONE
