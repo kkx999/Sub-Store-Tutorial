@@ -37,35 +37,21 @@ docker --version
 
 ## 第 3 步：部署 Sub-Store
 
-### 1. 生成后端安全随机路径
+先自定义一个后端访问路径。下面示例使用：
 
-下面会生成一个 64 位随机字符串：
-
-```bash
-SUB_PATH="$(openssl rand -hex 32)"
-echo "你的后端安全随机路径：/$SUB_PATH"
+```text
+/your-path
 ```
 
-> ⚠️ 请保存好显示出来的路径。它是 `SUB_STORE_FRONTEND_BACKEND_PATH`，准确来说是“后端访问路径前缀”，不是账号密码，但仍然不建议公开。
+把 `your-path` 改成你自己想要的内容即可，前面的 `/` 保留。建议使用容易保存但不容易被别人猜到的字母、数字或 `-`、`_` 组合，不需要固定长度。
 
-如果以后忘记，可以用下面的命令从容器中查看：
-
-```bash
-docker inspect sub-store --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^SUB_STORE_FRONTEND_BACKEND_PATH='
-```
-
-### 2. 启动容器
-
-下面的命令会检查 `SUB_PATH`，如果当前 shell 中没有刚才生成的值，会自动重新生成一个，避免误用空路径：
+然后启动容器：
 
 ```bash
-[ -n "$SUB_PATH" ] || SUB_PATH="$(openssl rand -hex 32)"
-echo "本次使用的后端安全随机路径：/$SUB_PATH"
-
 docker run -d \
   --restart=always \
   -e "SUB_STORE_BACKEND_SYNC_CRON=55 23 * * *" \
-  -e "SUB_STORE_FRONTEND_BACKEND_PATH=/$SUB_PATH" \
+  -e "SUB_STORE_FRONTEND_BACKEND_PATH=/your-path" \
   -p 127.0.0.1:3001:3001 \
   -v /etc/sub-store:/opt/app/data \
   --name sub-store \
@@ -75,12 +61,18 @@ docker run -d \
 说明：
 
 - `SUB_STORE_BACKEND_SYNC_CRON=55 23 * * *`：每天 23:55 执行 Sub-Store 后端同步任务。
-- `SUB_STORE_FRONTEND_BACKEND_PATH`：前端访问后端时使用的随机路径前缀。
+- `SUB_STORE_FRONTEND_BACKEND_PATH=/your-path`：前端访问后端时使用的自定义路径前缀。
 - `127.0.0.1:3001:3001`：只允许服务器本机访问 3001，不直接暴露到公网。
 - `/etc/sub-store:/opt/app/data`：持久化保存 Sub-Store 数据。
 - 容器内部端口固定为 `3001`。如果要修改宿主机端口，只修改左边，例如 `127.0.0.1:3002:3001`。
 
 > ⚠️ 旧环境变量 `SUB_STORE_CRON` 已进入淘汰路径，新部署请使用 `SUB_STORE_BACKEND_SYNC_CRON`。
+
+如果以后忘记自己设置的后端路径，可以用下面的命令查看：
+
+```bash
+docker inspect sub-store --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^SUB_STORE_FRONTEND_BACKEND_PATH='
+```
 
 检查容器是否正常：
 
@@ -263,15 +255,15 @@ systemctl reload nginx
 假设：
 
 - 域名：`sub.example.com`
-- 后端安全随机路径：`/你的随机路径`
+- 你自定义的后端路径：`/your-path`
 
 访问：
 
 ```text
-https://sub.example.com?api=https://sub.example.com/你的随机路径
+https://sub.example.com?api=https://sub.example.com/your-path
 ```
 
-也可以先查看当前容器使用的随机路径：
+查看当前容器设置的后端路径：
 
 ```bash
 docker inspect sub-store --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^SUB_STORE_FRONTEND_BACKEND_PATH='
@@ -283,7 +275,7 @@ docker inspect sub-store --format '{{range .Config.Env}}{{println .}}{{end}}' | 
 
 `docker restart` 只会重启旧容器，不会拉取新镜像。
 
-下面的更新方式会先自动读取你当前的后端随机路径，再重新创建容器。`/etc/sub-store` 是持久化目录，所以正常情况下不会丢失数据。
+下面的更新方式会先自动读取你当前设置的后端路径，再重新创建容器。`/etc/sub-store` 是持久化目录，所以正常情况下不会丢失数据。
 
 ```bash
 SUB_PATH="$(docker inspect sub-store --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^SUB_STORE_FRONTEND_BACKEND_PATH=//p')"
@@ -304,7 +296,7 @@ else
 fi
 ```
 
-这段更新命令不会因为读取路径失败而执行 `exit`，也不会在读取失败时删除现有容器。
+这段更新命令不会因为读取路径失败而删除现有容器。
 
 更新后检查：
 
@@ -436,7 +428,7 @@ systemctl status nginx --no-pager
 - 容器名
 - 宿主机端口
 - 数据目录
-- 后端安全随机路径
+- 后端自定义路径
 - 推荐使用不同域名
 
 第一套如果已经使用：
@@ -447,16 +439,13 @@ systemctl status nginx --no-pager
 数据：/etc/sub-store
 ```
 
-第二套可以这样部署：
+第二套可以这样部署，把 `/your-second-path` 换成第二套自己想要的后端路径：
 
 ```bash
-SUB_PATH2="$(openssl rand -hex 32)"
-echo "第二套后端安全随机路径：/$SUB_PATH2"
-
 docker run -d \
   --restart=always \
   -e "SUB_STORE_BACKEND_SYNC_CRON=50 23 * * *" \
-  -e "SUB_STORE_FRONTEND_BACKEND_PATH=/$SUB_PATH2" \
+  -e "SUB_STORE_FRONTEND_BACKEND_PATH=/your-second-path" \
   -p 127.0.0.1:3002:3001 \
   -v /etc/sub-store-2:/opt/app/data \
   --name sub-store-2 \
@@ -489,24 +478,6 @@ proxy_pass http://127.0.0.1:3002;
 指向第二套容器即可。
 
 如果两个子域名属于同一个 Cloudflare 根域名，可以使用同一个受限 API Token；如果属于不同根域名，需要确保 Token 对对应 Zone 有权限。
-
----
-
-## 可选：HTTP-META 镜像
-
-普通订阅管理、重命名、过滤、合并、转换等场景继续使用：
-
-```text
-xream/sub-store
-```
-
-如果明确需要依赖 HTTP-META 的节点测活、落地检测等脚本，可以在部署时把镜像替换成：
-
-```text
-xream/sub-store:http-meta
-```
-
-不要因为暂时用不到 HTTP-META 就盲目更换，基础使用保持 `xream/sub-store` 即可。
 
 ---
 
