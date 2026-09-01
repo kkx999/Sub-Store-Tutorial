@@ -1,269 +1,268 @@
-# Sub-Store 搭建教程
+# Sub-Store 一键搭建教程
 
 来源：[Sub-Store](https://github.com/sub-store-org/Sub-Store)  
 Docker 镜像：[xream/sub-store](https://hub.docker.com/r/xream/sub-store)
 
-> 本教程以 Debian / Ubuntu、root 用户为例。Sub-Store 只监听本机 `127.0.0.1`，公网访问统一通过 Nginx + HTTPS。
+本教程适用于 **Debian / Ubuntu**，使用 Docker 部署 Sub-Store，并自动完成 Cloudflare DNS API 证书申请和 Nginx HTTPS 反向代理。
+
+Sub-Store 端口只绑定在 `127.0.0.1`，不会直接暴露到公网。
 
 ---
 
-## 第 1 步：更新系统并安装必要组件
+## 部署前准备
 
-```bash
-apt update -y && apt install -y curl ca-certificates openssl cron nginx
-```
+### 1. 准备域名
 
-启动并设置 Nginx、cron 开机自启：
-
-```bash
-systemctl enable --now nginx cron
-```
-
----
-
-## 第 2 步：安装 Docker
-
-```bash
-curl -fsSL https://get.docker.com | bash -s docker
-```
-
-检查 Docker：
-
-```bash
-docker --version
-```
-
----
-
-## 第 3 步：部署 Sub-Store
-
-先自定义一个后端访问路径。下面示例使用：
+域名需要托管在 Cloudflare，并提前添加：
 
 ```text
-/your-path
+A 记录 -> 当前服务器公网 IPv4
 ```
 
-把 `your-path` 改成你自己想要的内容即可，前面的 `/` 保留。建议使用容易保存但不容易被别人猜到的字母、数字或 `-`、`_` 组合，不需要固定长度。
+Cloudflare 橙色云可以开启，不影响 DNS API 申请证书。
 
-然后启动容器：
+HTTPS 配置完成后，Cloudflare SSL/TLS 建议使用：
+
+```text
+Full (strict) / 完全（严格）
+```
+
+### 2. 创建 Cloudflare API Token
+
+创建一个自定义 API Token。
+
+推荐只给当前域名以下权限：
+
+```text
+Zone / DNS / Edit
+Zone / Zone / Read
+```
+
+`Zone Resources` 只选择需要部署 Sub-Store 的域名，不建议授权全部域名。
+
+> 建议使用 API Token，不要使用权限更大的 Global API Key。
+
+---
+
+# 一键部署
+
+当前修改正在测试分支 `update/deployment-guide-2026`，全新 Debian / Ubuntu 机器可以执行：
 
 ```bash
-docker run -d \
-  --restart=always \
-  -e "SUB_STORE_BACKEND_SYNC_CRON=55 23 * * *" \
-  -e "SUB_STORE_FRONTEND_BACKEND_PATH=/your-path" \
-  -p 127.0.0.1:3001:3001 \
-  -v /etc/sub-store:/opt/app/data \
-  --name sub-store \
-  xream/sub-store
+apt update -y && apt install -y git && \
+git clone -b update/deployment-guide-2026 --single-branch https://github.com/kkx999/Sub-Store-Tutorial.git && \
+cd Sub-Store-Tutorial && \
+bash install.sh
 ```
 
-说明：
+脚本会自动完成：
 
-- `SUB_STORE_BACKEND_SYNC_CRON=55 23 * * *`：每天 23:55 执行 Sub-Store 后端同步任务。
-- `SUB_STORE_FRONTEND_BACKEND_PATH=/your-path`：前端访问后端时使用的自定义路径前缀。
-- `127.0.0.1:3001:3001`：只允许服务器本机访问 3001，不直接暴露到公网。
-- `/etc/sub-store:/opt/app/data`：持久化保存 Sub-Store 数据。
-- 容器内部端口固定为 `3001`。如果要修改宿主机端口，只修改左边，例如 `127.0.0.1:3002:3001`。
+1. 安装必要系统组件
+2. 安装或检查 Docker
+3. 部署 Sub-Store
+4. 安装 acme.sh
+5. 使用 Cloudflare DNS API 申请 HTTPS 证书
+6. 自动生成 Nginx 配置
+7. 检查 Nginx 配置并重新加载
+8. 设置证书自动续期
 
-> ⚠️ 旧环境变量 `SUB_STORE_CRON` 已进入淘汰路径，新部署请使用 `SUB_STORE_BACKEND_SYNC_CRON`。
+---
 
-如果以后忘记自己设置的后端路径，可以用下面的命令查看：
+## 脚本需要输入什么
+
+运行后按提示填写即可。
+
+### 实例名称
+
+第一套直接回车即可：
+
+```text
+实例名称 [sub-store]:
+```
+
+默认使用：
+
+```text
+sub-store
+```
+
+对应数据目录：
+
+```text
+/etc/sub-store
+```
+
+### Sub-Store 本机端口
+
+第一套直接回车即可：
+
+```text
+Sub-Store 本机端口 [3001]:
+```
+
+默认：
+
+```text
+3001
+```
+
+容器内部端口始终是 `3001`，脚本只会把宿主机端口绑定到 `127.0.0.1`。
+
+### 后端访问路径
+
+自己填写想使用的内容即可，例如：
+
+```text
+请输入 Sub-Store 后端访问路径（例如 my-path）: abc123
+```
+
+脚本会自动处理前面的 `/`，最终使用：
+
+```text
+/abc123
+```
+
+不限制固定长度。
+
+建议使用自己容易保存、但不容易被别人猜到的内容。
+
+### 域名
+
+例如：
+
+```text
+请输入域名（例如 sub.example.com）: sub.example.com
+```
+
+只填写域名即可，不需要输入 `https://`。
+
+### 证书邮箱
+
+例如：
+
+```text
+请输入证书邮箱: your@email.com
+```
+
+### Cloudflare API Token
+
+例如：
+
+```text
+请输入 Cloudflare API Token: 你的Token
+```
+
+Token 输入时会正常显示，方便检查是否输入正确。
+
+脚本不会要求手动填写 Cloudflare Zone ID，acme.sh 会通过 Token 自动识别对应 Zone。
+
+---
+
+# 部署完成
+
+脚本成功后会直接显示 Sub-Store 访问地址，例如：
+
+```text
+https://sub.example.com?api=https://sub.example.com/abc123
+```
+
+同时会显示：
+
+```text
+实例名称
+数据目录
+本机端口
+后端访问路径
+```
+
+建议保存这些信息。
+
+---
+
+# 同一台服务器部署两个 Sub-Store
+
+可以。
+
+重新执行一次 `install.sh` 即可，但是第二套必须使用不同的：
+
+```text
+实例名称
+本机端口
+数据目录
+后端访问路径
+域名
+```
+
+例如：
+
+| 配置 | 第一套 | 第二套 |
+| --- | --- | --- |
+| 实例名称 | `sub-store` | `sub-store-2` |
+| 本机端口 | `3001` | `3002` |
+| 数据目录 | `/etc/sub-store` | `/etc/sub-store-2` |
+| 后端路径 | `/path-one` | `/path-two` |
+| 域名 | `sub1.example.com` | `sub2.example.com` |
+
+第二套运行脚本时填写：
+
+```text
+实例名称 [sub-store]: sub-store-2
+Sub-Store 本机端口 [3001]: 3002
+请输入 Sub-Store 后端访问路径（例如 my-path）: path-two
+请输入域名（例如 sub.example.com）: sub2.example.com
+```
+
+脚本会自动创建：
+
+```text
+/etc/sub-store-2
+```
+
+所以两套 Sub-Store **不会共用数据**。
+
+Nginx 配置、证书和 Docker 容器也会分别创建，不会使用第一套的配置。
+
+---
+
+# 常用管理命令
+
+假设实例名称是：
+
+```text
+sub-store
+```
+
+## 查看容器状态
 
 ```bash
-docker inspect sub-store --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^SUB_STORE_FRONTEND_BACKEND_PATH='
+docker ps -a --filter name=sub-store
 ```
 
-检查容器是否正常：
-
-```bash
-docker ps --filter name=sub-store
-```
-
-查看日志：
+## 查看日志
 
 ```bash
 docker logs -f -t --tail 100 sub-store
 ```
 
----
-
-## 第 4 步：在 Cloudflare 添加域名
-
-1. 在 Cloudflare 给准备使用的域名添加 `A` 记录，指向这台服务器的公网 IPv4。
-2. 有 IPv6 时也可以添加 `AAAA` 记录；没有 IPv6 不要添加。
-3. Cloudflare 橙色云（代理/CDN）可以开启，DNS API 申请证书不需要关闭代理。
-4. HTTPS 配置完成后，建议在 Cloudflare 的 SSL/TLS 中使用 **Full (strict) / 完全（严格）** 模式。
-
-下面统一用 `sub.example.com` 作为示例，请替换成你自己的域名。
-
----
-
-## 第 5 步：使用 Cloudflare DNS API 申请 HTTPS 证书
-
-这里不再使用占用 80 端口的 standalone 模式，改用 Cloudflare DNS API 验证。这样 Nginx 不需要停止，后续自动续期也不会和 80 端口冲突。
-
-### 1. 创建 Cloudflare API Token
-
-在 Cloudflare 创建一个自定义 API Token，只授权给你要申请证书的那个根域名。
-
-推荐权限：
-
-- `Zone / DNS / Edit`
-- `Zone / Zone / Read`
-- Zone Resources：只选择需要使用的那个域名，不要授权全部域名。
-
-同时在 Cloudflare 域名概览页面找到该域名的 **Zone ID**。
-
-> ⚠️ 使用 API Token，不建议使用权限更大的 Global API Key。
-
-### 2. 安装 acme.sh
-
-把邮箱替换成你自己的：
+## 重启
 
 ```bash
-curl https://get.acme.sh | sh -s email=your@email.com
+docker restart sub-store
 ```
 
-本教程使用 Let's Encrypt：
+## 停止
 
 ```bash
-/root/.acme.sh/acme.sh --set-default-ca --server letsencrypt
+docker stop sub-store
 ```
 
-### 3. 输入 Cloudflare API Token
-
-下面的输入方式不会把 Token 明文写进当前 shell 的历史命令：
+## 启动
 
 ```bash
-read -rsp "请输入 Cloudflare API Token: " CF_Token; export CF_Token; echo
+docker start sub-store
 ```
 
-填写 Zone ID：
-
-```bash
-export CF_Zone_ID="你的_ZONE_ID"
-```
-
-### 4. 申请证书
-
-注意把 `sub.example.com` 改成自己的域名：
-
-```bash
-/root/.acme.sh/acme.sh --issue --dns dns_cf -d sub.example.com --keylength ec-256
-```
-
-### 5. 安装证书到 Nginx 使用的目录
-
-```bash
-mkdir -p /etc/nginx/ssl
-```
-
-```bash
-/root/.acme.sh/acme.sh --install-cert -d sub.example.com --ecc \
-  --key-file /etc/nginx/ssl/sub.example.com.key \
-  --fullchain-file /etc/nginx/ssl/sub.example.com.cer \
-  --reloadcmd "systemctl reload nginx"
-```
-
-申请完成后可以清掉当前 shell 中的变量：
-
-```bash
-unset CF_Token CF_Zone_ID
-```
-
-acme.sh 安装时会创建定时任务检查证书续期；`--install-cert` 中设置的 reload 命令会在证书更新后重新加载 Nginx。
-
-检查 acme.sh 定时任务：
-
-```bash
-crontab -l | grep acme.sh
-```
-
-> ⚠️ Cloudflare API Token 后续续期仍然需要使用，不要在 Cloudflare 后台删除或撤销这个 Token。建议始终只给目标域名最小 DNS 权限。
-
----
-
-## 第 6 步：配置 Nginx
-
-不建议直接覆盖整个 `/etc/nginx/nginx.conf`。这里单独创建一个 Sub-Store 站点配置，后续升级系统或增加其他网站更安全。
-
-创建配置：
-
-```bash
-nano /etc/nginx/sites-available/sub-store
-```
-
-写入下面内容，并把所有 `sub.example.com` 改成自己的域名：
-
-```nginx
-server {
-    listen 80;
-    server_name sub.example.com;
-
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name sub.example.com;
-
-    ssl_certificate     /etc/nginx/ssl/sub.example.com.cer;
-    ssl_certificate_key /etc/nginx/ssl/sub.example.com.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
-
-    location / {
-        proxy_pass http://127.0.0.1:3001;
-        proxy_http_version 1.1;
-
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-}
-```
-
-启用配置：
-
-```bash
-ln -sf /etc/nginx/sites-available/sub-store /etc/nginx/sites-enabled/sub-store
-rm -f /etc/nginx/sites-enabled/default
-```
-
-检查配置：
-
-```bash
-nginx -t
-```
-
-如果看到 `syntax is ok` 和 `test is successful`，重新加载 Nginx：
-
-```bash
-systemctl reload nginx
-```
-
-> ⚠️ 如果你把 Docker 的宿主机端口从 `3001` 改成其他端口，这里的 `proxy_pass http://127.0.0.1:3001;` 也必须改成同一个端口，否则会出现 `502 Bad Gateway`。
-
----
-
-## 第 7 步：访问 Sub-Store
-
-假设：
-
-- 域名：`sub.example.com`
-- 你自定义的后端路径：`/your-path`
-
-访问：
-
-```text
-https://sub.example.com?api=https://sub.example.com/your-path
-```
-
-查看当前容器设置的后端路径：
+## 查看后端访问路径
 
 ```bash
 docker inspect sub-store --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^SUB_STORE_FRONTEND_BACKEND_PATH='
@@ -271,55 +270,21 @@ docker inspect sub-store --format '{{range .Config.Env}}{{println .}}{{end}}' | 
 
 ---
 
-## 第 8 步：更新 Sub-Store
+# 备份
 
-`docker restart` 只会重启旧容器，不会拉取新镜像。
+第一套默认数据目录：
 
-下面的更新方式会先自动读取你当前设置的后端路径，再重新创建容器。`/etc/sub-store` 是持久化目录，所以正常情况下不会丢失数据。
-
-```bash
-SUB_PATH="$(docker inspect sub-store --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^SUB_STORE_FRONTEND_BACKEND_PATH=//p')"
-
-if [ -z "$SUB_PATH" ]; then
-  echo "无法读取原来的 SUB_STORE_FRONTEND_BACKEND_PATH，已停止更新；现有容器不会被删除。"
-else
-  docker pull xream/sub-store && \
-  docker rm -f sub-store && \
-  docker run -d \
-    --restart=always \
-    -e "SUB_STORE_BACKEND_SYNC_CRON=55 23 * * *" \
-    -e "SUB_STORE_FRONTEND_BACKEND_PATH=$SUB_PATH" \
-    -p 127.0.0.1:3001:3001 \
-    -v /etc/sub-store:/opt/app/data \
-    --name sub-store \
-    xream/sub-store
-fi
+```text
+/etc/sub-store
 ```
 
-这段更新命令不会因为读取路径失败而删除现有容器。
-
-更新后检查：
+推荐停止容器后备份：
 
 ```bash
-docker ps --filter name=sub-store
-docker logs --tail 50 sub-store
-```
-
----
-
-## 第 9 步：备份与恢复
-
-### 备份
-
-为了避免备份时数据正在写入，推荐短暂停止容器：
-
-```bash
-docker stop sub-store
-tar -czf "/root/sub-store-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C /etc sub-store
+docker stop sub-store && \
+tar -czf "/root/sub-store-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C /etc sub-store && \
 docker start sub-store
 ```
-
-备份文件会保存在 `/root/`。
 
 查看备份：
 
@@ -327,22 +292,17 @@ docker start sub-store
 ls -lh /root/sub-store-backup-*.tar.gz
 ```
 
-### 恢复
+如果是第二套 `sub-store-2`，对应备份目录就是：
 
-把下面的备份文件名改成你实际的文件：
-
-```bash
-docker stop sub-store
-rm -rf /etc/sub-store
-tar -xzf /root/sub-store-backup-YYYYMMDD-HHMMSS.tar.gz -C /etc
-docker start sub-store
+```text
+/etc/sub-store-2
 ```
 
 ---
 
-## 第 10 步：卸载
+# 卸载
 
-### 只卸载容器，保留数据
+## 删除容器但保留数据
 
 ```bash
 docker rm -f sub-store
@@ -354,16 +314,16 @@ docker rm -f sub-store
 /etc/sub-store
 ```
 
-### 完全删除 Sub-Store 数据
+## 完全删除数据
 
-> ⚠️ 下面命令不可恢复，请确认已经备份。
+> 以下操作不可恢复，确认备份以后再执行。
 
 ```bash
 docker rm -f sub-store 2>/dev/null || true
 rm -rf /etc/sub-store
 ```
 
-如果这个域名以后也不再使用，可以再删除对应 Nginx 配置：
+对应 Nginx 配置可以删除：
 
 ```bash
 rm -f /etc/nginx/sites-enabled/sub-store /etc/nginx/sites-available/sub-store
@@ -372,112 +332,60 @@ nginx -t && systemctl reload nginx
 
 ---
 
-## 第 11 步：常见故障排查
+# 常见故障排查
 
-### 查看容器状态
+## 查看本机端口
 
-```bash
-docker ps -a --filter name=sub-store
-```
-
-### 查看最近 100 行日志
-
-```bash
-docker logs -t --tail 100 sub-store
-```
-
-### 持续查看日志
-
-```bash
-docker logs -f -t --tail 100 sub-store
-```
-
-### 检查本机 3001 是否可以访问
+第一套默认：
 
 ```bash
 curl -I http://127.0.0.1:3001
 ```
 
-### 检查端口监听
+## 查看端口监听
 
 ```bash
 ss -lntp | grep -E ':80|:443|:3001'
 ```
 
-### 检查 Nginx
+## 检查 Nginx
 
 ```bash
 nginx -t
 systemctl status nginx --no-pager
 ```
 
-### 出现 502 Bad Gateway
+## 出现 502 Bad Gateway
 
-优先检查：
+检查：
 
-1. `docker ps` 中 Sub-Store 是否正在运行。
-2. Docker 映射的宿主机端口是否和 Nginx `proxy_pass` 一致。
-3. `curl -I http://127.0.0.1:3001` 是否有响应。
+```bash
+docker ps -a --filter name=sub-store
+docker logs --tail 100 sub-store
+curl -I http://127.0.0.1:3001
+```
+
+脚本生成的 Nginx 配置会自动使用部署时填写的端口，一般不需要手动修改 `proxy_pass`。
 
 ---
 
-## 第 12 步：同一台服务器部署两个 Sub-Store
+# 证书续期
 
-可以部署多个实例，但必须使用不同的：
+acme.sh 会自动安装定时任务检查证书续期。
 
-- 容器名
-- 宿主机端口
-- 数据目录
-- 后端自定义路径
-- 推荐使用不同域名
-
-第一套如果已经使用：
-
-```text
-容器：sub-store
-端口：127.0.0.1:3001
-数据：/etc/sub-store
-```
-
-第二套可以这样部署，把 `/your-second-path` 换成第二套自己想要的后端路径：
+检查：
 
 ```bash
-docker run -d \
-  --restart=always \
-  -e "SUB_STORE_BACKEND_SYNC_CRON=50 23 * * *" \
-  -e "SUB_STORE_FRONTEND_BACKEND_PATH=/your-second-path" \
-  -p 127.0.0.1:3002:3001 \
-  -v /etc/sub-store-2:/opt/app/data \
-  --name sub-store-2 \
-  xream/sub-store
+crontab -l | grep acme.sh
 ```
 
-注意这里是：
+证书续期成功后会自动执行：
 
 ```text
-127.0.0.1:3002:3001
-          ↑    ↑
-       宿主机  容器内部
+systemctl reload nginx
 ```
 
-容器内部仍然固定使用 `3001`，第二套只把宿主机端口改成 `3002`。
-
-第二套建议使用另外一个域名，例如：
-
-```text
-sub1.example.com -> 127.0.0.1:3001
-sub2.example.com -> 127.0.0.1:3002
-```
-
-第二个域名重复执行上面的 Cloudflare DNS API 证书申请步骤，然后再创建第二个 Nginx 站点，并把：
-
-```nginx
-proxy_pass http://127.0.0.1:3002;
-```
-
-指向第二套容器即可。
-
-如果两个子域名属于同一个 Cloudflare 根域名，可以使用同一个受限 API Token；如果属于不同根域名，需要确保 Token 对对应 Zone 有权限。
+Cloudflare API Token 后续续期仍然需要使用，所以不要在 Cloudflare 后台删除或撤销正在使用的 Token。
 
 ---
 
