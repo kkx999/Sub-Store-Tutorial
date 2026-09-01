@@ -91,7 +91,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/ma
 例如：
 
 ```text
-请输入后端访问路径（仅字母、数字、-、_）: abc123
+请输入后端访问路径（仅字母和数字）: abc123
 请输入域名（例如 sub.example.com）: sub1.example.com
 请输入证书邮箱: your@email.com
 请输入 Cloudflare API Token: 你的Token
@@ -101,7 +101,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/ma
 
 - 不限制固定长度
 - 脚本会自动补前面的 `/`
-- 只允许字母、数字、`-`、`_`
+- 只允许字母和数字，避免特殊符号带来的兼容问题
 - 建议设置成不容易被别人猜到的内容
 
 Cloudflare Token 输入时会正常显示。
