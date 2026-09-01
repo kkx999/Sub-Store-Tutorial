@@ -296,27 +296,196 @@ docker inspect sub-store-2 --format '{{range .Config.Env}}{{println .}}{{end}}' 
 
 ---
 
-# 备份
+# 备份与恢复
 
-第一套数据：
-
-```text
-/etc/sub-store
-```
-
-第二套数据：
+每一套 Sub-Store 的数据目录都是独立的：
 
 ```text
-/etc/sub-store-2
+第 1 套：/etc/sub-store
+第 2 套：/etc/sub-store-2
+第 3 套：/etc/sub-store-3
 ```
 
-第一套备份示例：
+备份时会把对应数据目录压缩成 `.tar.gz` 文件并保存在 `/root/`，然后可以下载到自己的电脑或手机长期保存。
+
+## 1. 备份第一套
+
+执行：
 
 ```bash
 docker stop sub-store && \
-tar -czf "/root/sub-store-backup-$(date +%Y%m%d-%H%M%S).tar.gz" -C /etc sub-store && \
+BACKUP="/root/sub-store-backup-$(date +%Y%m%d-%H%M%S).tar.gz" && \
+tar -czf "$BACKUP" -C /etc sub-store && \
+docker start sub-store && \
+echo "备份完成：$BACKUP"
+```
+
+执行完成后会显示类似：
+
+```text
+备份完成：/root/sub-store-backup-20260902-021800.tar.gz
+```
+
+这就是需要下载保存的备份文件。
+
+## 2. 备份第二套
+
+执行：
+
+```bash
+docker stop sub-store-2 && \
+BACKUP="/root/sub-store-2-backup-$(date +%Y%m%d-%H%M%S).tar.gz" && \
+tar -czf "$BACKUP" -C /etc sub-store-2 && \
+docker start sub-store-2 && \
+echo "备份完成：$BACKUP"
+```
+
+第三套同理，把 `sub-store-2` 改成 `sub-store-3` 即可。
+
+## 3. 查看服务器上的备份文件
+
+```bash
+ls -lh /root/sub-store*-backup-*.tar.gz
+```
+
+会看到类似：
+
+```text
+/root/sub-store-backup-20260902-021800.tar.gz
+/root/sub-store-2-backup-20260902-022000.tar.gz
+```
+
+## 4. 下载备份到自己的电脑
+
+下面这条命令是在**自己的电脑终端 / PowerShell**执行，不是在 VPS 里面执行。
+
+把 `服务器IP` 和备份文件名换成自己的：
+
+```bash
+scp root@服务器IP:/root/sub-store-backup-20260902-021800.tar.gz .
+```
+
+下载完成后，备份文件会保存到电脑当前目录。
+
+如果 SSH 不是默认 `22` 端口，例如使用 `2222`：
+
+```bash
+scp -P 2222 root@服务器IP:/root/sub-store-backup-20260902-021800.tar.gz .
+```
+
+如果使用手机，可以使用支持 **SFTP** 的 SSH 文件管理工具连接服务器，然后进入：
+
+```text
+/root/
+```
+
+找到对应的 `.tar.gz` 备份文件并下载到手机即可。
+
+> 建议确认备份已经成功下载到本地以后，再考虑删除服务器 `/root/` 中较旧的备份。
+
+---
+
+# 怎么恢复备份
+
+恢复前先确认备份属于哪一套：
+
+```text
+sub-store-backup-xxxx.tar.gz    -> 第一套
+sub-store-2-backup-xxxx.tar.gz  -> 第二套
+sub-store-3-backup-xxxx.tar.gz  -> 第三套
+```
+
+不要把第二套备份恢复到第一套目录。
+
+## 1. 如果备份文件已经在服务器 `/root/`
+
+可以直接进入下面的恢复步骤。
+
+## 2. 如果备份只保存在自己的电脑
+
+先在**自己的电脑终端 / PowerShell**上传回服务器：
+
+```bash
+scp sub-store-backup-20260902-021800.tar.gz root@服务器IP:/root/
+```
+
+如果 SSH 使用 `2222` 端口：
+
+```bash
+scp -P 2222 sub-store-backup-20260902-021800.tar.gz root@服务器IP:/root/
+```
+
+手机同样可以通过 SFTP 把备份文件上传到：
+
+```text
+/root/
+```
+
+## 3. 恢复第一套
+
+假设备份文件是：
+
+```text
+/root/sub-store-backup-20260902-021800.tar.gz
+```
+
+执行：
+
+```bash
+docker stop sub-store && \
+mv /etc/sub-store "/etc/sub-store.before-restore-$(date +%Y%m%d-%H%M%S)" && \
+tar -xzf /root/sub-store-backup-20260902-021800.tar.gz -C /etc && \
 docker start sub-store
 ```
+
+这里不会直接删除原来的数据，而是先把原数据改名保存一份，出现问题时还能找回来。
+
+恢复完成后检查：
+
+```bash
+docker ps --filter name=sub-store
+docker logs --tail 50 sub-store
+```
+
+然后打开自己的 Sub-Store，确认订阅和配置是否已经恢复。
+
+## 4. 恢复第二套
+
+假设备份文件是：
+
+```text
+/root/sub-store-2-backup-20260902-022000.tar.gz
+```
+
+执行：
+
+```bash
+docker stop sub-store-2 && \
+mv /etc/sub-store-2 "/etc/sub-store-2.before-restore-$(date +%Y%m%d-%H%M%S)" && \
+tar -xzf /root/sub-store-2-backup-20260902-022000.tar.gz -C /etc && \
+docker start sub-store-2
+```
+
+恢复后检查：
+
+```bash
+docker ps --filter name=sub-store-2
+docker logs --tail 50 sub-store-2
+```
+
+## 5. 恢复到一台全新的服务器
+
+先使用本教程的一键脚本部署对应的 Sub-Store 实例，让 Docker、Nginx 和证书先正常工作。
+
+然后：
+
+1. 把备份文件上传到新服务器 `/root/`
+2. 停止对应 Sub-Store 容器
+3. 按上面的恢复命令替换数据目录
+4. 启动容器
+5. 检查日志和网页数据
+
+> 备份主要保存的是 Sub-Store 持久化数据。新服务器上的域名、HTTPS、Nginx 和 Docker 容器仍建议先通过安装脚本重新部署好，再恢复数据。
 
 ---
 
