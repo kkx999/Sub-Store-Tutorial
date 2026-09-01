@@ -3,18 +3,17 @@
 来源：[Sub-Store](https://github.com/sub-store-org/Sub-Store)  
 Docker 镜像：[xream/sub-store](https://hub.docker.com/r/xream/sub-store)
 
-本教程适用于 **Debian / Ubuntu**。
+本教程适用于 **Debian / Ubuntu**，使用 Docker 部署 Sub-Store，并自动完成：
 
-脚本会自动完成：
+- Docker 安装
+- Sub-Store 部署
+- Cloudflare DNS API 申请 HTTPS 证书
+- Nginx HTTPS 反向代理
+- 证书自动续期
+- 多实例自动分配
+- 更新 / 备份 / 恢复 / 卸载管理
 
-- 安装 Docker
-- 部署 Sub-Store
-- 申请 HTTPS 证书
-- 配置 Nginx
-- 设置证书自动续期
-- 自动管理同一台服务器上的多套 Sub-Store
-
-Sub-Store 只绑定到 `127.0.0.1`，不会直接把服务端口暴露到公网。
+Sub-Store 只绑定到 `127.0.0.1`，不会直接把 3001 等内部服务端口暴露到公网。
 
 ---
 
@@ -27,6 +26,8 @@ Sub-Store 只绑定到 `127.0.0.1`，不会直接把服务端口暴露到公网�
 ```text
 A 记录 -> 当前服务器公网 IPv4
 ```
+
+有 IPv6 时可以添加 AAAA；没有 IPv6 不要添加。
 
 Cloudflare 橙色云可以开启，不影响 DNS API 申请证书。
 
@@ -47,9 +48,9 @@ Zone / DNS / Edit
 Zone / Zone / Read
 ```
 
-`Zone Resources` 建议只选择需要使用的域名，不要授权全部域名。
+`Zone Resources` 建议只授权实际要使用的域名，不要授权全部域名。
 
-> 建议使用 API Token，不要使用权限更大的 Global API Key。
+> 推荐使用 API Token，不要使用权限更大的 Global API Key。
 
 ---
 
@@ -61,13 +62,13 @@ Zone / Zone / Read
 bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/main/install.sh)
 ```
 
-以后部署第二套、第三套，**还是执行完全相同的这一条命令**。
+脚本会自动安装需要的软件，并检查 Docker、Nginx、证书和 Sub-Store 后端是否正常。
 
 ---
 
 # 第一次部署
 
-第一次运行时，脚本会自动识别为：
+第一次运行时，通常会自动分配：
 
 ```text
 第 1 套 Sub-Store
@@ -76,7 +77,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/ma
 数据目录：/etc/sub-store
 ```
 
-这些内容全部由脚本自动处理，用户不用修改。
+如果 `3001` 已经被其他程序占用，脚本会自动寻找下一个空闲端口，不需要用户手动处理。
 
 接下来只需要输入：
 
@@ -90,19 +91,24 @@ bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/ma
 例如：
 
 ```text
-请输入后端访问路径（例如 my-path）: abc123
+请输入后端访问路径（仅字母、数字、-、_）: abc123
 请输入域名（例如 sub.example.com）: sub1.example.com
 请输入证书邮箱: your@email.com
 请输入 Cloudflare API Token: 你的Token
 ```
 
-后端路径不限制固定长度，脚本会自动处理前面的 `/`。
+后端路径：
 
-Cloudflare Token 输入时会正常显示，方便确认输入是否正确。
+- 不限制固定长度
+- 脚本会自动补前面的 `/`
+- 只允许字母、数字、`-`、`_`
+- 建议设置成不容易被别人猜到的内容
+
+Cloudflare Token 输入时会正常显示。
 
 脚本会自动识别 Cloudflare Zone，不需要手动填写 Zone ID。
 
-部署成功后会直接显示完整访问地址，例如：
+部署完成后会显示完整访问地址，例如：
 
 ```text
 https://sub1.example.com?api=https://sub1.example.com/abc123
@@ -110,39 +116,51 @@ https://sub1.example.com?api=https://sub1.example.com/abc123
 
 ---
 
-# 第二套怎么部署
+# 第二套、第三套怎么部署
 
-非常简单。
-
-**再次执行同一条命令：**
+仍然执行同一条命令：
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/main/install.sh)
 ```
 
-脚本检测到第一套已经存在后，会自动变成：
+脚本会自动识别已有实例。
+
+第二套通常会自动分配：
 
 ```text
-检测到本次将部署第 2 套 Sub-Store
-
-已自动分配：
 容器名称：sub-store-2
 本机端口：3002
 数据目录：/etc/sub-store-2
 ```
 
-用户不需要自己设置 `sub-store-2`、`3002` 或 `/etc/sub-store-2`。
-
-第二套只需要填写：
+第三套通常会自动分配：
 
 ```text
-请输入后端访问路径：
-请输入域名：
+容器名称：sub-store-3
+本机端口：3003
+数据目录：/etc/sub-store-3
 ```
 
-证书邮箱会自动沿用第一套，不需要重复输入。
+如果默认端口被其他程序占用，脚本会自动寻找下一个空闲端口。
 
-如果服务器已经保存过 Cloudflare Token，脚本会询问：
+用户不需要自己设置容器名称、端口或数据目录。
+
+第二套以后只需要填写：
+
+```text
+后端访问路径
+域名
+Cloudflare Token 选择
+```
+
+证书邮箱会自动沿用第一次保存的邮箱。
+
+---
+
+# Cloudflare Token 怎么选择
+
+如果服务器已经保存过 Token，脚本会显示：
 
 ```text
 检测到之前保存的 Cloudflare API Token：
@@ -151,35 +169,35 @@ bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/ma
 请选择 [1/2]:
 ```
 
-如果第二个域名仍然属于旧 Token 的授权范围，直接回车使用 `1` 即可。
+如果新域名仍然属于旧 Token 的授权范围，直接回车使用 `1`。
 
-如果第二个域名需要另外一个 Token，输入：
+如果需要另外一个 Token，选择：
 
 ```text
 2
 ```
 
-然后再输入新的 Cloudflare API Token。
+然后输入新的 Token。
 
-脚本会自动检查这个 Token 能不能访问当前域名。
+脚本会先验证 Token 是否能访问当前域名对应的 Cloudflare Zone，再申请证书。
 
-如果选择旧 Token，但旧 Token 没有当前域名权限，脚本也会自动提示重新输入新的 Token。
+证书签发后还会检查 acme.sh 是否确实保存了当前域名的 `CF_Token` 和 `CF_Zone_ID`。如果无法确认续期凭据已经保存，脚本会停止部署，避免出现“现在能用、以后证书却无法自动续期”的情况。
 
 ---
 
-# 多套 Sub-Store 的数据是否独立
+# 多套 Sub-Store 是否共用数据
 
-是。
+不会。
 
-脚本会自动给每一套分配独立的：
+每一套都会独立使用：
 
 ```text
 Docker 容器
 本机端口
 数据目录
-Nginx 配置
-域名证书
 后端访问路径
+Nginx 配置
+HTTPS 证书
 ```
 
 例如：
@@ -187,42 +205,424 @@ Nginx 配置
 ```text
 第 1 套
 容器：sub-store
-端口：3001
 数据：/etc/sub-store
 
 第 2 套
 容器：sub-store-2
-端口：3002
 数据：/etc/sub-store-2
 
 第 3 套
 容器：sub-store-3
-端口：3003
 数据：/etc/sub-store-3
 ```
 
 所以第二套不会读取或覆盖第一套的数据。
 
-以后再部署第三套、第四套，也只需要继续执行同一条安装命令。
+---
+
+# 日常管理
+
+更新、备份、恢复、卸载统一使用一个管理脚本：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/main/manage.sh)
+```
+
+运行后会显示：
+
+```text
+========================================
+        Sub-Store 管理脚本
+========================================
+1) 更新 Sub-Store
+2) 备份
+3) 恢复备份
+4) 卸载
+5) 查看实例状态
+0) 退出
+```
+
+如果服务器有多套 Sub-Store，脚本会先列出所有实例，再让你选择要操作哪一套。
 
 ---
 
-# Cloudflare Token 说明
+# 更新 Sub-Store
 
-脚本会把最近一次成功使用的 Cloudflare Token 保存在服务器本地，仅供下次部署时选择复用。
+运行管理脚本：
 
-保存目录权限只允许 root 访问。
-
-申请证书时，脚本会自动识别当前域名对应的 Cloudflare Zone，并让 acme.sh 把当前域名使用的 Token 和 Zone 信息保存到该域名自己的证书配置中。
-
-因此：
-
-```text
-第一套使用 Token A
-第二套使用 Token B
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/main/manage.sh)
 ```
 
-也不会因为后来输入 Token B，就把第一套证书续期需要的 Token A 覆盖掉。
+选择：
+
+```text
+1) 更新 Sub-Store
+```
+
+然后选择实例。
+
+更新过程会自动：
+
+1. 读取原来的端口、数据目录、后端路径和同步定时配置
+2. 自动生成一份更新前备份
+3. 拉取最新 `xream/sub-store`
+4. 暂时保留旧容器作为回滚版本
+5. 启动新版本
+6. 检查真实后端 API：
+   ```text
+   /你的后端路径/api/utils/env
+   ```
+7. 健康检查成功后才删除旧容器
+
+如果新版本启动失败或后端健康检查失败，脚本会自动恢复原来的旧容器。
+
+所以不要使用：
+
+```bash
+docker restart sub-store
+```
+
+来当作更新。`docker restart` 只是重启当前旧镜像，不会拉取新版本。
+
+---
+
+# 备份
+
+运行管理脚本：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/main/manage.sh)
+```
+
+选择：
+
+```text
+2) 备份
+```
+
+然后选择要备份的实例。
+
+脚本会：
+
+1. 记录容器原来的运行状态
+2. 如果容器正在运行，先短暂停止
+3. 打包数据
+4. 无论备份成功还是失败，都尽量恢复到备份前的运行状态
+5. 成功后显示备份文件完整路径
+
+例如：
+
+```text
+备份完成：/root/sub-store-backup-20260902-021800.tar.gz
+```
+
+第二套类似：
+
+```text
+/root/sub-store-2-backup-20260902-022000.tar.gz
+```
+
+备份文件保存在：
+
+```text
+/root/
+```
+
+新的备份格式只保存 Sub-Store 的持久化数据内容，所以备份可以恢复到你选择的任意 Sub-Store 实例，不要求“第二套备份只能恢复到第二套”。
+
+旧版 README 生成的：
+
+```text
+sub-store-backup-xxxx.tar.gz
+sub-store-2-backup-xxxx.tar.gz
+```
+
+管理脚本也会尽量自动兼容。
+
+---
+
+# 怎么下载备份到自己的电脑
+
+备份成功后，管理脚本会直接给出 `scp` 示例。
+
+例如备份文件：
+
+```text
+/root/sub-store-backup-20260902-021800.tar.gz
+```
+
+在 **自己的电脑终端 / PowerShell** 执行：
+
+```bash
+scp root@服务器IP:/root/sub-store-backup-20260902-021800.tar.gz .
+```
+
+如果 SSH 不是默认 `22` 端口，例如 `2222`：
+
+```bash
+scp -P 2222 root@服务器IP:/root/sub-store-backup-20260902-021800.tar.gz .
+```
+
+最后面的：
+
+```text
+.
+```
+
+表示保存到电脑当前目录。
+
+如果使用手机，可以使用支持 **SFTP** 的 SSH 工具连接服务器，进入：
+
+```text
+/root/
+```
+
+找到对应 `.tar.gz` 文件下载到手机。
+
+建议确认备份已经下载到自己的设备后，再清理服务器上的旧备份。
+
+---
+
+# 怎么把备份上传回服务器
+
+如果以后需要恢复，在自己的电脑终端 / PowerShell 执行：
+
+```bash
+scp sub-store-backup-20260902-021800.tar.gz root@服务器IP:/root/
+```
+
+非 22 SSH 端口，例如 `2222`：
+
+```bash
+scp -P 2222 sub-store-backup-20260902-021800.tar.gz root@服务器IP:/root/
+```
+
+手机同样可以通过 SFTP 上传到：
+
+```text
+/root/
+```
+
+---
+
+# 恢复备份
+
+先确保备份文件已经上传到服务器，例如：
+
+```text
+/root/sub-store-backup-20260902-021800.tar.gz
+```
+
+然后运行：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/main/manage.sh)
+```
+
+选择：
+
+```text
+3) 恢复备份
+```
+
+接下来：
+
+1. 选择要恢复到哪一套 Sub-Store
+2. 输入备份文件完整路径
+3. 确认恢复
+
+例如：
+
+```text
+/root/sub-store-backup-20260902-021800.tar.gz
+```
+
+恢复前，管理脚本会先：
+
+- 检查压缩包能否正常读取
+- 检查压缩包路径是否安全
+- 先解压到临时目录
+- 保留当前数据完整副本
+
+真正替换数据后，还会启动 Sub-Store 并检查：
+
+```text
+/你的后端路径/api/utils/env
+```
+
+如果恢复失败、解压失败、后端健康检查失败，或者恢复过程中脚本异常退出，会尽量自动把恢复前的数据放回去。
+
+恢复成功后，原来的数据不会马上删除，而是保留成类似：
+
+```text
+/etc/sub-store.before-restore-20260902-030000
+```
+
+确认恢复后的数据完全正常后，可以再手动删除这个旧目录释放空间。
+
+---
+
+# 换新服务器怎么恢复
+
+备份主要保存的是 **Sub-Store 持久化数据**。
+
+如果换了一台全新的服务器：
+
+1. 先给新服务器准备 Cloudflare 域名
+2. 使用一键安装脚本部署一套新的 Sub-Store
+3. 确认新服务器 HTTPS 和 Sub-Store 可以正常打开
+4. 把旧服务器的 `.tar.gz` 备份上传到新服务器 `/root/`
+5. 运行 `manage.sh`
+6. 选择 `恢复备份`
+7. 选择新服务器上的目标实例
+8. 输入备份路径
+
+新备份格式允许把以前的第二套、第三套数据恢复到新服务器的第一套，只要你明确选择目标实例即可。
+
+域名、HTTPS、Nginx 和 Docker 容器建议在新服务器上重新由安装脚本生成，不需要从旧服务器复制。
+
+---
+
+# 卸载
+
+运行：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/main/manage.sh)
+```
+
+选择：
+
+```text
+4) 卸载
+```
+
+然后选择实例。
+
+会有两个选项：
+
+```text
+1) 卸载服务，但保留数据目录
+2) 完全卸载，并永久删除数据
+```
+
+## 保留数据
+
+会删除：
+
+```text
+Docker 容器
+对应 Nginx 站点
+```
+
+但保留：
+
+```text
+/etc/sub-store
+```
+
+或对应的：
+
+```text
+/etc/sub-store-2
+/etc/sub-store-3
+```
+
+保留的数据不会被下一次一键安装覆盖。
+
+## 完全卸载
+
+需要再次输入：
+
+```text
+DELETE
+```
+
+才会继续。
+
+完全卸载会删除：
+
+- Docker 容器
+- 对应 Nginx 配置
+- 对应数据目录
+- 对应安装证书文件
+- 从 acme.sh 自动续期列表中移除该域名
+
+> 完全卸载的数据不可恢复，建议先备份并下载到自己的设备。
+
+---
+
+# 查看实例状态
+
+运行管理脚本后选择：
+
+```text
+5) 查看实例状态
+```
+
+会显示：
+
+```text
+实例
+运行状态
+本机端口
+数据目录
+后端访问路径
+```
+
+也可以手动查看：
+
+```bash
+docker ps -a --filter name=sub-store
+```
+
+---
+
+# 常见故障排查
+
+## 查看第一套日志
+
+```bash
+docker logs -f -t --tail 100 sub-store
+```
+
+## 查看第二套日志
+
+```bash
+docker logs -f -t --tail 100 sub-store-2
+```
+
+## 检查 Nginx
+
+```bash
+nginx -t
+systemctl status nginx --no-pager
+```
+
+## 检查第一套端口
+
+如果第一套实际使用的是 3001：
+
+```bash
+curl -I http://127.0.0.1:3001
+```
+
+实际端口请以安装完成时脚本显示的结果为准。
+
+## 查看后端访问路径
+
+第一套：
+
+```bash
+docker inspect sub-store --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^SUB_STORE_FRONTEND_BACKEND_PATH='
+```
+
+第二套：
+
+```bash
+docker inspect sub-store-2 --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^SUB_STORE_FRONTEND_BACKEND_PATH='
+```
 
 ---
 
@@ -242,279 +642,9 @@ crontab -l | grep acme.sh
 systemctl reload nginx
 ```
 
-> 正在使用的 Cloudflare API Token 不要在 Cloudflare 后台删除或撤销，否则对应域名以后可能无法自动续期。
+Cloudflare API Token 后续续期仍然需要使用。
 
----
-
-# 常用管理命令
-
-## 查看所有 Sub-Store 容器
-
-```bash
-docker ps -a --filter name=sub-store
-```
-
-## 第一套日志
-
-```bash
-docker logs -f -t --tail 100 sub-store
-```
-
-## 第二套日志
-
-```bash
-docker logs -f -t --tail 100 sub-store-2
-```
-
-## 重启第一套
-
-```bash
-docker restart sub-store
-```
-
-## 重启第二套
-
-```bash
-docker restart sub-store-2
-```
-
----
-
-# 查看后端访问路径
-
-第一套：
-
-```bash
-docker inspect sub-store --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^SUB_STORE_FRONTEND_BACKEND_PATH='
-```
-
-第二套：
-
-```bash
-docker inspect sub-store-2 --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^SUB_STORE_FRONTEND_BACKEND_PATH='
-```
-
----
-
-# 备份与恢复
-
-每一套 Sub-Store 的数据目录都是独立的：
-
-```text
-第 1 套：/etc/sub-store
-第 2 套：/etc/sub-store-2
-第 3 套：/etc/sub-store-3
-```
-
-备份时会把对应数据目录压缩成 `.tar.gz` 文件并保存在 `/root/`，然后可以下载到自己的电脑或手机长期保存。
-
-## 1. 备份第一套
-
-执行：
-
-```bash
-docker stop sub-store && \
-BACKUP="/root/sub-store-backup-$(date +%Y%m%d-%H%M%S).tar.gz" && \
-tar -czf "$BACKUP" -C /etc sub-store && \
-docker start sub-store && \
-echo "备份完成：$BACKUP"
-```
-
-执行完成后会显示类似：
-
-```text
-备份完成：/root/sub-store-backup-20260902-021800.tar.gz
-```
-
-这就是需要下载保存的备份文件。
-
-## 2. 备份第二套
-
-执行：
-
-```bash
-docker stop sub-store-2 && \
-BACKUP="/root/sub-store-2-backup-$(date +%Y%m%d-%H%M%S).tar.gz" && \
-tar -czf "$BACKUP" -C /etc sub-store-2 && \
-docker start sub-store-2 && \
-echo "备份完成：$BACKUP"
-```
-
-第三套同理，把 `sub-store-2` 改成 `sub-store-3` 即可。
-
-## 3. 查看服务器上的备份文件
-
-```bash
-ls -lh /root/sub-store*-backup-*.tar.gz
-```
-
-会看到类似：
-
-```text
-/root/sub-store-backup-20260902-021800.tar.gz
-/root/sub-store-2-backup-20260902-022000.tar.gz
-```
-
-## 4. 下载备份到自己的电脑
-
-下面这条命令是在**自己的电脑终端 / PowerShell**执行，不是在 VPS 里面执行。
-
-把 `服务器IP` 和备份文件名换成自己的：
-
-```bash
-scp root@服务器IP:/root/sub-store-backup-20260902-021800.tar.gz .
-```
-
-下载完成后，备份文件会保存到电脑当前目录。
-
-如果 SSH 不是默认 `22` 端口，例如使用 `2222`：
-
-```bash
-scp -P 2222 root@服务器IP:/root/sub-store-backup-20260902-021800.tar.gz .
-```
-
-如果使用手机，可以使用支持 **SFTP** 的 SSH 文件管理工具连接服务器，然后进入：
-
-```text
-/root/
-```
-
-找到对应的 `.tar.gz` 备份文件并下载到手机即可。
-
-> 建议确认备份已经成功下载到本地以后，再考虑删除服务器 `/root/` 中较旧的备份。
-
----
-
-# 怎么恢复备份
-
-恢复前先确认备份属于哪一套：
-
-```text
-sub-store-backup-xxxx.tar.gz    -> 第一套
-sub-store-2-backup-xxxx.tar.gz  -> 第二套
-sub-store-3-backup-xxxx.tar.gz  -> 第三套
-```
-
-不要把第二套备份恢复到第一套目录。
-
-## 1. 如果备份文件已经在服务器 `/root/`
-
-可以直接进入下面的恢复步骤。
-
-## 2. 如果备份只保存在自己的电脑
-
-先在**自己的电脑终端 / PowerShell**上传回服务器：
-
-```bash
-scp sub-store-backup-20260902-021800.tar.gz root@服务器IP:/root/
-```
-
-如果 SSH 使用 `2222` 端口：
-
-```bash
-scp -P 2222 sub-store-backup-20260902-021800.tar.gz root@服务器IP:/root/
-```
-
-手机同样可以通过 SFTP 把备份文件上传到：
-
-```text
-/root/
-```
-
-## 3. 恢复第一套
-
-假设备份文件是：
-
-```text
-/root/sub-store-backup-20260902-021800.tar.gz
-```
-
-执行：
-
-```bash
-docker stop sub-store && \
-mv /etc/sub-store "/etc/sub-store.before-restore-$(date +%Y%m%d-%H%M%S)" && \
-tar -xzf /root/sub-store-backup-20260902-021800.tar.gz -C /etc && \
-docker start sub-store
-```
-
-这里不会直接删除原来的数据，而是先把原数据改名保存一份，出现问题时还能找回来。
-
-恢复完成后检查：
-
-```bash
-docker ps --filter name=sub-store
-docker logs --tail 50 sub-store
-```
-
-然后打开自己的 Sub-Store，确认订阅和配置是否已经恢复。
-
-## 4. 恢复第二套
-
-假设备份文件是：
-
-```text
-/root/sub-store-2-backup-20260902-022000.tar.gz
-```
-
-执行：
-
-```bash
-docker stop sub-store-2 && \
-mv /etc/sub-store-2 "/etc/sub-store-2.before-restore-$(date +%Y%m%d-%H%M%S)" && \
-tar -xzf /root/sub-store-2-backup-20260902-022000.tar.gz -C /etc && \
-docker start sub-store-2
-```
-
-恢复后检查：
-
-```bash
-docker ps --filter name=sub-store-2
-docker logs --tail 50 sub-store-2
-```
-
-## 5. 恢复到一台全新的服务器
-
-先使用本教程的一键脚本部署对应的 Sub-Store 实例，让 Docker、Nginx 和证书先正常工作。
-
-然后：
-
-1. 把备份文件上传到新服务器 `/root/`
-2. 停止对应 Sub-Store 容器
-3. 按上面的恢复命令替换数据目录
-4. 启动容器
-5. 检查日志和网页数据
-
-> 备份主要保存的是 Sub-Store 持久化数据。新服务器上的域名、HTTPS、Nginx 和 Docker 容器仍建议先通过安装脚本重新部署好，再恢复数据。
-
----
-
-# 常见故障排查
-
-## 查看容器
-
-```bash
-docker ps -a --filter name=sub-store
-```
-
-## 检查 Nginx
-
-```bash
-nginx -t
-systemctl status nginx --no-pager
-```
-
-## 检查第一套本机端口
-
-```bash
-curl -I http://127.0.0.1:3001
-```
-
-## 检查第二套本机端口
-
-```bash
-curl -I http://127.0.0.1:3002
-```
+> 正在使用的 Token 不要在 Cloudflare 后台删除或撤销，否则对应域名以后可能无法自动续期。
 
 ---
 
