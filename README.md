@@ -56,7 +56,12 @@ docker inspect sub-store --format '{{range .Config.Env}}{{println .}}{{end}}' | 
 
 ### 2. 启动容器
 
+下面的命令会检查 `SUB_PATH`，如果当前 shell 中没有刚才生成的值，会自动重新生成一个，避免误用空路径：
+
 ```bash
+[ -n "$SUB_PATH" ] || SUB_PATH="$(openssl rand -hex 32)"
+echo "本次使用的后端安全随机路径：/$SUB_PATH"
+
 docker run -d \
   --restart=always \
   -e "SUB_STORE_BACKEND_SYNC_CRON=55 23 * * *" \
@@ -282,20 +287,24 @@ docker inspect sub-store --format '{{range .Config.Env}}{{println .}}{{end}}' | 
 
 ```bash
 SUB_PATH="$(docker inspect sub-store --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^SUB_STORE_FRONTEND_BACKEND_PATH=//p')"
-[ -n "$SUB_PATH" ] || { echo "无法读取原来的 SUB_STORE_FRONTEND_BACKEND_PATH，已停止更新"; exit 1; }
 
-docker pull xream/sub-store
-docker rm -f sub-store
-
-docker run -d \
-  --restart=always \
-  -e "SUB_STORE_BACKEND_SYNC_CRON=55 23 * * *" \
-  -e "SUB_STORE_FRONTEND_BACKEND_PATH=$SUB_PATH" \
-  -p 127.0.0.1:3001:3001 \
-  -v /etc/sub-store:/opt/app/data \
-  --name sub-store \
-  xream/sub-store
+if [ -z "$SUB_PATH" ]; then
+  echo "无法读取原来的 SUB_STORE_FRONTEND_BACKEND_PATH，已停止更新；现有容器不会被删除。"
+else
+  docker pull xream/sub-store && \
+  docker rm -f sub-store && \
+  docker run -d \
+    --restart=always \
+    -e "SUB_STORE_BACKEND_SYNC_CRON=55 23 * * *" \
+    -e "SUB_STORE_FRONTEND_BACKEND_PATH=$SUB_PATH" \
+    -p 127.0.0.1:3001:3001 \
+    -v /etc/sub-store:/opt/app/data \
+    --name sub-store \
+    xream/sub-store
+fi
 ```
+
+这段更新命令不会因为读取路径失败而执行 `exit`，也不会在读取失败时删除现有容器。
 
 更新后检查：
 
