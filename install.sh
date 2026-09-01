@@ -7,6 +7,7 @@ TOKEN_FILE="$STATE_DIR/cloudflare-token"
 SUCCESS=0
 CREATED_CONTAINER=0
 CREATED_DATA_DIR=0
+DATA_DIR_PREEXISTED_EMPTY=0
 CREATED_NGINX=0
 INSTANCE_NAME=""
 DATA_DIR=""
@@ -29,6 +30,9 @@ cleanup() {
     fi
     if [ "$CREATED_DATA_DIR" -eq 1 ] && [ -n "$DATA_DIR" ]; then
       rm -rf "$DATA_DIR" 2>/dev/null || true
+    elif [ "$DATA_DIR_PREEXISTED_EMPTY" -eq 1 ] && [ -n "$DATA_DIR" ]; then
+      rm -rf "$DATA_DIR" 2>/dev/null || true
+      mkdir -p "$DATA_DIR" 2>/dev/null || true
     fi
   fi
 
@@ -129,14 +133,14 @@ cat <<EOF_INFO
 ----------------------------------------
 EOF_INFO
 
-read -rp "请输入后端访问路径（仅字母、数字、-、_）: " SUB_PATH
+read -rp "请输入后端访问路径（仅字母和数字）: " SUB_PATH
 SUB_PATH="${SUB_PATH#/}"
 if [ -z "$SUB_PATH" ]; then
   echo "后端访问路径不能为空。"
   exit 1
 fi
-if [[ ! "$SUB_PATH" =~ ^[A-Za-z0-9_-]+$ ]]; then
-  echo "后端访问路径格式不正确，只能使用字母、数字、短横线 - 和下划线 _。"
+if [[ ! "$SUB_PATH" =~ ^[A-Za-z0-9]+$ ]]; then
+  echo "后端访问路径格式不正确，只能使用字母和数字。"
   exit 1
 fi
 SUB_PATH="/$SUB_PATH"
@@ -342,7 +346,7 @@ elif [ ! -d "$DATA_DIR" ]; then
   echo "数据路径 $DATA_DIR 已存在但不是目录，已停止部署。"
   exit 1
 elif [ -z "$(find "$DATA_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
-  CREATED_DATA_DIR=1
+  DATA_DIR_PREEXISTED_EMPTY=1
 fi
 
 echo "[6/8] 启动 Sub-Store..."
