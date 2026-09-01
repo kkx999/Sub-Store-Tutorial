@@ -28,6 +28,8 @@ UPDATE_ROLLBACK_NAME=""
 UPDATE_WAS_RUNNING=0
 UPDATE_ACTIVE=0
 UPDATE_RENAMED=0
+UPDATE_BACKUP_PATH=""
+UPDATE_DATA_DIR=""
 RESTORE_NAME=""
 RESTORE_DATA_DIR=""
 RESTORE_OLD_DIR=""
@@ -151,6 +153,13 @@ backup_instance() {
   fi
 
   BACKUP_PARTIAL=""
+  chmod 600 "$backup"
+  if ! tar -tzf "$backup" >/dev/null 2>&1; then
+    rm -f "$backup"
+    trap - EXIT INT TERM
+    echo "备份文件校验失败，已删除异常备份。"
+    return 1
+  fi
   LAST_BACKUP="$backup"
   trap - EXIT INT TERM
 
@@ -160,19 +169,60 @@ backup_instance() {
   fi
 }
 
+restore_update_backup() {
+  local stage failed_dir
+  [ -n "$UPDATE_BACKUP_PATH" ] && [ -f "$UPDATE_BACKUP_PATH" ] || return 1
+  [ -n "$UPDATE_DATA_DIR" ] || return 1
+
+  stage="$(mktemp -d /tmp/sub-store-update-rollback.XXXXXX)" || return 1
+  mkdir -p "$stage/data"
+  if ! tar -xzf "$UPDATE_BACKUP_PATH" -C "$stage/data"; then
+    rm -rf "$stage"
+    return 1
+  fi
+
+  failed_dir="${UPDATE_DATA_DIR}.failed-update-$(date +%Y%m%d-%H%M%S)"
+  if [ -e "$UPDATE_DATA_DIR" ]; then
+    mv "$UPDATE_DATA_DIR" "$failed_dir" || { rm -rf "$stage"; return 1; }
+  else
+    failed_dir=""
+  fi
+
+  if mv "$stage/data" "$UPDATE_DATA_DIR"; then
+    if [ -n "$failed_dir" ] && [ -e "$failed_dir" ]; then
+      chmod --reference="$failed_dir" "$UPDATE_DATA_DIR" 2>/dev/null || true
+      chown --reference="$failed_dir" "$UPDATE_DATA_DIR" 2>/dev/null || true
+      rm -rf "$failed_dir"
+    fi
+    rm -rf "$stage"
+    return 0
+  fi
+
+  rm -rf "$UPDATE_DATA_DIR" "$stage"
+  if [ -n "$failed_dir" ] && [ -e "$failed_dir" ]; then
+    mv "$failed_dir" "$UPDATE_DATA_DIR" >/dev/null 2>&1 || true
+  fi
+  return 1
+}
+
 update_exit_cleanup() {
   if [ "$UPDATE_ACTIVE" -ne 1 ] || [ -z "$UPDATE_NAME" ]; then
     return 0
   fi
 
   echo
-  echo "更新未完成，正在自动恢复原容器..."
+  echo "更新未完成，正在自动恢复更新前状态..."
 
-  if [ "$UPDATE_RENAMED" -eq 1 ]; then
+  if docker inspect "$UPDATE_ROLLBACK_NAME" >/dev/null 2>&1; then
     docker rm -f "$UPDATE_NAME" >/dev/null 2>&1 || true
-    if docker inspect "$UPDATE_ROLLBACK_NAME" >/dev/null 2>&1; then
-      docker rename "$UPDATE_ROLLBACK_NAME" "$UPDATE_NAME" >/dev/null 2>&1 || true
+
+    if restore_update_backup; then
+      echo "更新前数据已自动恢复。"
+    else
+      echo "警告：自动恢复更新前数据失败，请保留备份并人工检查：$UPDATE_BACKUP_PATH"
     fi
+
+    docker rename "$UPDATE_ROLLBACK_NAME" "$UPDATE_NAME" >/dev/null 2>&1 || true
   fi
 
   if [ "$UPDATE_WAS_RUNNING" -eq 1 ] && docker inspect "$UPDATE_NAME" >/dev/null 2>&1; then
@@ -211,6 +261,8 @@ update_instance() {
   UPDATE_NAME="$name"
   UPDATE_ROLLBACK_NAME="$rollback_name"
   UPDATE_WAS_RUNNING="$was_running"
+  UPDATE_BACKUP_PATH="$backup_path"
+  UPDATE_DATA_DIR="$data_dir"
   UPDATE_ACTIVE=1
   UPDATE_RENAMED=0
   trap update_exit_cleanup EXIT
@@ -432,8 +484,15 @@ uninstall_instance() {
         echo "Nginx 重新加载失败，已恢复站点链接，未卸载容器。"
         exit 1
       fi
+      if ! docker rm -f "$name" >/dev/null 2>&1; then
+        if [ -f "$site" ]; then
+          ln -sfn "$site" "$link"
+          systemctl reload nginx >/dev/null 2>&1 || true
+        fi
+        echo "Docker 容器删除失败，已恢复 Nginx 站点，数据未删除。"
+        exit 1
+      fi
       rm -f "$site"
-      docker rm -f "$name" >/dev/null 2>&1 || true
 
       echo "已卸载 $name。"
       echo "数据仍保留：$data_dir"
@@ -458,9 +517,21 @@ uninstall_instance() {
         echo "Nginx 重新加载失败，已恢复站点链接，未删除容器或数据。"
         exit 1
       fi
+      if ! docker rm -f "$name" >/dev/null 2>&1; then
+        if [ -f "$site" ]; then
+          ln -sfn "$site" "$link"
+          systemctl reload nginx >/dev/null 2>&1 || true
+        fi
+        echo "Docker 容器删除失败，已恢复 Nginx 站点；数据和证书均未删除。"
+        exit 1
+      fi
       rm -f "$site"
-      docker rm -f "$name" >/dev/null 2>&1 || true
-      rm -rf "$data_dir"
+
+      if [ -z "$data_dir" ] || [ "$data_dir" = "/" ]; then
+        echo "检测到异常数据目录，已停止删除数据：$data_dir"
+        exit 1
+      fi
+      rm -rf -- "$data_dir"
 
       if [ -n "$domain" ]; then
         /root/.acme.sh/acme.sh --remove -d "$domain" --ecc >/dev/null 2>&1 || true
