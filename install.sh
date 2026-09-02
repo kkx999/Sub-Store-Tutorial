@@ -45,10 +45,27 @@ if [ "${EUID:-$(id -u)}" -ne 0 ]; then
   exit 1
 fi
 
-if ! command -v apt >/dev/null 2>&1; then
+if ! command -v apt-get >/dev/null 2>&1; then
   echo "当前脚本仅支持 Debian / Ubuntu。"
   exit 1
 fi
+
+if ! command -v systemctl >/dev/null 2>&1; then
+  echo "未检测到 systemctl。当前脚本需要标准 Debian / Ubuntu VPS 环境，不支持无 systemd 的精简容器环境。"
+  exit 1
+fi
+
+download_stdout() {
+  local url="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- "$url"
+  else
+    echo "缺少 curl 和 wget，无法下载：$url" >&2
+    return 1
+  fi
+}
 
 cat <<'EOF_BANNER'
 ========================================
@@ -74,14 +91,50 @@ cat <<'EOF_BANNER'
 EOF_BANNER
 
 echo
-echo "[1/8] 安装系统依赖..."
-apt update -y
-DEBIAN_FRONTEND=noninteractive apt install -y curl ca-certificates openssl cron nginx iproute2 jq tar
+echo "[1/8] 安装并检查系统依赖..."
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y \
+  ca-certificates \
+  curl \
+  wget \
+  sudo \
+  openssl \
+  cron \
+  nginx \
+  iproute2 \
+  jq \
+  tar \
+  gzip \
+  coreutils \
+  findutils \
+  grep \
+  sed \
+  gawk
+
+update-ca-certificates >/dev/null 2>&1 || true
+
+MISSING_CMD=0
+for cmd in curl wget sudo openssl cron nginx jq tar gzip ss awk grep sed find seq; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "依赖安装后仍缺少命令：$cmd"
+    MISSING_CMD=1
+  fi
+done
+if [ "$MISSING_CMD" -ne 0 ]; then
+  echo "系统依赖不完整，已停止部署。请先检查 apt 软件源是否正常。"
+  exit 1
+fi
+
 systemctl enable --now cron nginx
 
 echo "[2/8] 检查 Docker..."
 if ! command -v docker >/dev/null 2>&1; then
-  curl -fsSL https://get.docker.com | bash -s docker
+  download_stdout https://get.docker.com | bash -s docker
+fi
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Docker 安装失败或 docker 命令不可用。"
+  exit 1
 fi
 systemctl enable --now docker
 
@@ -273,7 +326,11 @@ fi
 
 echo "[3/8] 安装并配置 acme.sh..."
 if [ ! -x /root/.acme.sh/acme.sh ]; then
-  curl -fsSL https://get.acme.sh | sh -s "email=$ACME_EMAIL"
+  download_stdout https://get.acme.sh | sh -s "email=$ACME_EMAIL"
+fi
+if [ ! -x /root/.acme.sh/acme.sh ]; then
+  echo "acme.sh 安装失败。"
+  exit 1
 fi
 /root/.acme.sh/acme.sh --set-default-ca --server letsencrypt
 
