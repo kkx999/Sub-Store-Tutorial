@@ -6,16 +6,16 @@ if ! command -v apt-get >/dev/null 2>&1; then echo "当前脚本仅支持 Debian
 if ! command -v systemctl >/dev/null 2>&1; then echo "未检测到 systemctl，当前脚本需要标准 Debian / Ubuntu VPS。"; exit 1; fi
 
 NEED_DEPS=0
-for c in curl wget sudo jq tar gzip nginx awk grep sed sort head wc cut cp mv rm chmod chown mktemp date seq ls mkdir sleep ln; do
+for c in curl wget sudo jq tar gzip nginx openssl awk grep sed sort head wc cut cp mv rm chmod chown mktemp date seq ls mkdir sleep ln; do
   command -v "$c" >/dev/null 2>&1 || { NEED_DEPS=1; break; }
 done
 if [ "$NEED_DEPS" -eq 1 ]; then
   echo "检测到缺少基础命令，正在自动补齐..."
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y curl wget sudo ca-certificates jq tar gzip coreutils grep sed gawk nginx >/dev/null
+  apt-get install -y curl wget sudo ca-certificates jq tar gzip coreutils grep sed gawk nginx openssl >/dev/null
 fi
-for c in curl wget sudo jq tar gzip nginx awk grep sed sort head wc cut cp mv rm chmod chown mktemp date seq ls mkdir sleep ln; do
+for c in curl wget sudo jq tar gzip nginx openssl awk grep sed sort head wc cut cp mv rm chmod chown mktemp date seq ls mkdir sleep ln; do
   command -v "$c" >/dev/null 2>&1 || { echo "依赖安装后仍缺少命令：$c"; exit 1; }
 done
 command -v docker >/dev/null 2>&1 || { echo "未检测到 Docker，请先运行一键安装脚本。"; exit 1; }
@@ -34,6 +34,51 @@ health(){
   local n="$1" p="$2" x="$3"
   for _ in $(seq 1 30); do running "$n" && curl -fsS --max-time 5 "http://127.0.0.1:$p$x/api/utils/env" >/dev/null 2>&1 && return 0; sleep 2; done
   return 1
+}
+ensure_https_default_reject(){
+  local site="/etc/nginx/sites-available/sub-store-default-reject"
+  local link="/etc/nginx/sites-enabled/sub-store-default-reject"
+  local version=""
+  local reject_key="/etc/nginx/ssl/sub-store-default-reject.key"
+  local reject_cert="/etc/nginx/ssl/sub-store-default-reject.crt"
+
+  if nginx -T 2>/dev/null | grep -Eq '^[[:space:]]*listen[[:space:]][^;]*443[^;]*default_server'; then
+    return 0
+  fi
+
+  version="$(nginx -v 2>&1 | sed -n 's#.*nginx/\([0-9.]*\).*#\1#p')"
+  if [ -n "$version" ] && [ "$(printf '%s\n%s\n' '1.19.4' "$version" | sort -V | head -n1)" = "1.19.4" ]; then
+    cat > "$site" <<'EOF_REJECT'
+server {
+    listen 443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+}
+EOF_REJECT
+  else
+    mkdir -p /etc/nginx/ssl
+    if [ ! -s "$reject_key" ] || [ ! -s "$reject_cert" ]; then
+      openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+        -keyout "$reject_key" -out "$reject_cert" -subj '/CN=invalid.local' >/dev/null 2>&1 || return 1
+      chmod 600 "$reject_key"
+    fi
+    cat > "$site" <<EOF_REJECT
+server {
+    listen 443 ssl default_server;
+    server_name _;
+    ssl_certificate $reject_cert;
+    ssl_certificate_key $reject_key;
+    return 444;
+}
+EOF_REJECT
+  fi
+
+  ln -sfn "$site" "$link"
+  if ! nginx -t; then
+    rm -f "$link" "$site"
+    return 1
+  fi
+  systemctl reload nginx
 }
 instances(){
   mapfile -t INS < <(docker ps -a --format '{{.Names}}' | grep -E '^sub-store(-[0-9]+)?$' | sort -V || true)
@@ -184,6 +229,12 @@ do_uninstall(){
   choose; local n="$SEL" d site link domain="" choice ok expected
   d="$(data "$n")"; site="/etc/nginx/sites-available/$n"; link="/etc/nginx/sites-enabled/$n"; expected="/etc/$n"
   [ -f "$site" ] && domain="$(awk '/^[[:space:]]*server_name[[:space:]]+/ {gsub(";","",$2); print $2; exit}' "$site")"
+
+  if ! ensure_https_default_reject; then
+    echo "无法建立 HTTPS 默认拒绝站点，为避免卸载后旧域名串到其他实例，本次卸载已停止。"
+    exit 1
+  fi
+
   echo "1) 卸载服务，但保留数据"; echo "2) 完全卸载，并永久删除数据"; read -rp "请选择 [1/2]: " choice
   if [ "$choice" = 2 ]; then
     [ "$d" = "$expected" ] && [ -d "$d" ] || { echo "数据目录异常：$d"; echo "为防止误删，已停止完全卸载。"; exit 1; }

@@ -67,6 +67,54 @@ download_stdout() {
   fi
 }
 
+ensure_https_default_reject() {
+  local site="/etc/nginx/sites-available/sub-store-default-reject"
+  local link="/etc/nginx/sites-enabled/sub-store-default-reject"
+  local version=""
+  local reject_key="/etc/nginx/ssl/sub-store-default-reject.key"
+  local reject_cert="/etc/nginx/ssl/sub-store-default-reject.crt"
+
+  if nginx -T 2>/dev/null | grep -Eq '^[[:space:]]*listen[[:space:]][^;]*443[^;]*default_server'; then
+    echo "检测到已有 HTTPS 默认站点，保持现有配置。"
+    return 0
+  fi
+
+  version="$(nginx -v 2>&1 | sed -n 's#.*nginx/\([0-9.]*\).*#\1#p')"
+  if [ -n "$version" ] && [ "$(printf '%s\n%s\n' '1.19.4' "$version" | sort -V | head -n1)" = "1.19.4" ]; then
+    cat > "$site" <<'EOF_REJECT'
+server {
+    listen 443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+}
+EOF_REJECT
+  else
+    mkdir -p /etc/nginx/ssl
+    if [ ! -s "$reject_key" ] || [ ! -s "$reject_cert" ]; then
+      openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+        -keyout "$reject_key" -out "$reject_cert" -subj '/CN=invalid.local' >/dev/null 2>&1 || return 1
+      chmod 600 "$reject_key"
+    fi
+    cat > "$site" <<EOF_REJECT
+server {
+    listen 443 ssl default_server;
+    server_name _;
+    ssl_certificate $reject_cert;
+    ssl_certificate_key $reject_key;
+    return 444;
+}
+EOF_REJECT
+  fi
+
+  ln -sfn "$site" "$link"
+  if ! nginx -t; then
+    rm -f "$link" "$site"
+    return 1
+  fi
+  systemctl reload nginx
+  echo "HTTPS 默认拒绝站点已启用。"
+}
+
 cat <<'EOF_BANNER'
 ========================================
         Sub-Store 一键部署脚本
@@ -115,7 +163,7 @@ apt-get install -y \
 update-ca-certificates >/dev/null 2>&1 || true
 
 MISSING_CMD=0
-for cmd in curl wget sudo openssl cron nginx jq tar gzip ss awk grep sed find seq; do
+for cmd in curl wget sudo openssl cron nginx jq tar gzip ss awk grep sed find seq sort head; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "依赖安装后仍缺少命令：$cmd"
     MISSING_CMD=1
@@ -127,6 +175,10 @@ if [ "$MISSING_CMD" -ne 0 ]; then
 fi
 
 systemctl enable --now cron nginx
+if ! ensure_https_default_reject; then
+  echo "无法配置 HTTPS 默认拒绝站点，为避免已卸载域名串到其他 Sub-Store，本次部署已停止。"
+  exit 1
+fi
 
 echo "[2/8] 检查 Docker..."
 if ! command -v docker >/dev/null 2>&1; then
