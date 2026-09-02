@@ -87,7 +87,7 @@ cat <<'EOF_BANNER'
 请先确保：
 - 域名已经托管到 Cloudflare
 - 域名 A 记录已经指向本机公网 IPv4
-- Cloudflare API Token 具有：Zone / DNS / Edit、Zone / Zone / Read
+- Cloudflare API Token 具有：DNS / Edit、Zone / Read
 EOF_BANNER
 
 echo
@@ -296,6 +296,58 @@ if ! detect_cf_zone "$CF_Token"; then
     echo "Cloudflare Token 无法识别该域名，请检查 Token 权限和域名是否已托管到 Cloudflare。"
     exit 1
   fi
+fi
+
+detect_public_ipv4() {
+  local trace=""
+  PUBLIC_IPV4=""
+
+  trace="$(curl -4 -fsS --connect-timeout 10 --max-time 20 https://1.1.1.1/cdn-cgi/trace 2>/dev/null || true)"
+  PUBLIC_IPV4="$(printf '%s\n' "$trace" | awk -F= '$1=="ip" {print $2; exit}')"
+
+  if [[ ! "$PUBLIC_IPV4" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    PUBLIC_IPV4="$(curl -4 -fsS --connect-timeout 10 --max-time 20 https://api.ipify.org 2>/dev/null || true)"
+  fi
+
+  [[ "$PUBLIC_IPV4" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+}
+
+check_cf_a_record() {
+  local response=""
+  local record_ips=""
+
+  response="$(curl -fsS --connect-timeout 10 --max-time 20 \
+    -H "Authorization: Bearer $CF_Token" \
+    -H "Content-Type: application/json" \
+    "https://api.cloudflare.com/client/v4/zones/$CF_Zone_ID/dns_records?type=A&name=$DOMAIN&per_page=100")" || return 2
+
+  if [ "$(printf '%s' "$response" | jq -r '.success // false' 2>/dev/null)" != "true" ]; then
+    return 2
+  fi
+
+  record_ips="$(printf '%s' "$response" | jq -r '.result[]?.content' 2>/dev/null)"
+  if [ -z "$record_ips" ]; then
+    return 1
+  fi
+
+  printf '%s\n' "$record_ips" | grep -Fxq "$PUBLIC_IPV4"
+}
+
+if detect_public_ipv4; then
+  if check_cf_a_record; then
+    echo "Cloudflare A 记录检查通过：$DOMAIN -> $PUBLIC_IPV4"
+  else
+    A_CHECK_RC=$?
+    if [ "$A_CHECK_RC" -eq 1 ]; then
+      echo "Cloudflare A 记录未指向当前服务器公网 IPv4：$PUBLIC_IPV4"
+      echo "请先把 $DOMAIN 的 A 记录修改为 $PUBLIC_IPV4，再重新运行脚本。"
+      exit 1
+    else
+      echo "警告：无法通过 Cloudflare API 自动核对 A 记录，将继续部署。"
+    fi
+  fi
+else
+  echo "警告：无法自动获取当前服务器公网 IPv4，跳过 A 记录核对。"
 fi
 
 CERT_FILE="$SSL_DIR/$DOMAIN.cer"
