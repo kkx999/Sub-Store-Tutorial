@@ -39,18 +39,18 @@ Full (strict) / 完全（严格）
 
 ## 2. 创建 Cloudflare API Token
 
-创建一个自定义 API Token。
-
-推荐权限：
+创建 **自定义 API Token**，权限只勾下面两个：
 
 ```text
-Zone / DNS / Edit
-Zone / Zone / Read
+DNS  → Edit
+Zone → Read
 ```
 
-`Zone Resources` 建议只授权实际要使用的域名，不要授权全部域名。
+**其他权限全部不要勾。**
 
-> 推荐使用 API Token，不要使用权限更大的 Global API Key。
+`Zone Resources` 只选择你要部署 Sub-Store 的域名。
+
+> 使用 API Token，不要使用 Global API Key。
 
 ---
 
@@ -544,9 +544,7 @@ DELETE
 
 才会继续。
 
-完全卸载会先确认 Nginx 和 Docker 容器都能安全移除；如果容器删除失败，不会继续删除数据或证书。
-
-完全卸载成功后会删除：
+完全卸载会删除：
 
 - Docker 容器
 - 对应 Nginx 配置
@@ -566,25 +564,17 @@ DELETE
 5) 查看实例状态
 ```
 
-会显示：
-
-```text
-实例
-运行状态
-本机端口
-数据目录
-后端访问路径
-```
-
-也可以手动查看：
-
-```bash
-docker ps -a --filter name=sub-store
-```
+会列出每一套实例的容器名称、运行状态、本机端口和数据目录。
 
 ---
 
 # 常见故障排查
+
+## 查看所有容器
+
+```bash
+docker ps -a --filter name=sub-store
+```
 
 ## 查看第一套日志
 
@@ -605,33 +595,31 @@ nginx -t
 systemctl status nginx --no-pager
 ```
 
-## 检查第一套端口
+## 查看真实后端健康状态
 
-如果第一套实际使用的是 3001：
-
-```bash
-curl -I http://127.0.0.1:3001
-```
-
-实际端口请以安装完成时脚本显示的结果为准。
-
-## 查看后端访问路径
-
-第一套：
+先查看对应实例的后端路径：
 
 ```bash
 docker inspect sub-store --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^SUB_STORE_FRONTEND_BACKEND_PATH='
 ```
 
-第二套：
+假设输出：
+
+```text
+SUB_STORE_FRONTEND_BACKEND_PATH=/abc123
+```
+
+第一套默认端口为 `3001` 时，可以检查：
 
 ```bash
-docker inspect sub-store-2 --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^SUB_STORE_FRONTEND_BACKEND_PATH='
+curl -fsS http://127.0.0.1:3001/abc123/api/utils/env
 ```
+
+如果安装时 3001 被占用，实际端口以安装脚本显示的端口为准，也可以运行管理脚本选择 `查看实例状态`。
 
 ---
 
-# 证书自动续期
+# 证书续期
 
 acme.sh 会自动安装定时任务检查证书续期。
 
@@ -641,15 +629,15 @@ acme.sh 会自动安装定时任务检查证书续期。
 crontab -l | grep acme.sh
 ```
 
+每个域名使用签发时保存的 Cloudflare 凭据进行 DNS 验证。
+
 证书续期成功后会自动执行：
 
 ```text
 systemctl reload nginx
 ```
 
-Cloudflare API Token 后续续期仍然需要使用。
-
-> 正在使用的 Token 不要在 Cloudflare 后台删除或撤销，否则对应域名以后可能无法自动续期。
+> 正在使用的 Cloudflare API Token 不要在 Cloudflare 后台删除或撤销，否则对应域名以后可能无法自动续期。
 
 ---
 
