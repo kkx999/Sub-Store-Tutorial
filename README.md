@@ -56,13 +56,15 @@ Zone → Read
 
 # 一键部署
 
-全新 Debian / Ubuntu 服务器直接执行：
+全新 Debian / Ubuntu 服务器直接执行这一条命令：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/main/install.sh)
+apt-get update && apt-get install -y curl wget sudo ca-certificates && bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/main/install.sh)
 ```
 
-脚本会自动安装需要的软件，并检查 Docker、Nginx、证书和 Sub-Store 后端是否正常。
+这条命令会先补齐极简系统常见缺失的 `curl`、`wget`、`sudo` 和 HTTPS 证书组件，再启动安装脚本，因此不会因为全新系统缺少这些基础命令而直接报错。
+
+脚本随后会继续自动安装所需组件，并检查 Docker、Nginx、证书和 Sub-Store 后端是否正常。
 
 ---
 
@@ -121,7 +123,7 @@ https://sub1.example.com?api=https://sub1.example.com/abc123
 仍然执行同一条命令：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/main/install.sh)
+apt-get update && apt-get install -y curl wget sudo ca-certificates && bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/main/install.sh)
 ```
 
 脚本会自动识别已有实例。
