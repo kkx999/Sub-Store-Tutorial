@@ -27,8 +27,6 @@ Sub-Store 只绑定到 `127.0.0.1`，不会直接把 3001 等内部服务端口�
 A 记录 -> 当前服务器公网 IPv4
 ```
 
-有 IPv6 时可以添加 AAAA；没有 IPv6 不要添加。
-
 Cloudflare 橙色云可以开启，不影响 DNS API 申请证书。
 
 HTTPS 配置完成后，Cloudflare SSL/TLS 建议使用：
@@ -64,7 +62,7 @@ apt-get update && apt-get install -y curl wget sudo ca-certificates && bash <(cu
 
 这条命令会先补齐极简系统常见缺失的 `curl`、`wget`、`sudo` 和 HTTPS 证书组件，再启动安装脚本，因此不会因为全新系统缺少这些基础命令而直接报错。
 
-脚本随后会继续自动安装所需组件，并检查 Docker、Nginx、证书和 Sub-Store 后端是否正常。
+脚本随后会继续自动安装所需组件，并检查 Docker、Nginx、Cloudflare A 记录、证书和 Sub-Store 后端是否正常。
 
 ---
 
@@ -109,6 +107,8 @@ apt-get update && apt-get install -y curl wget sudo ca-certificates && bash <(cu
 Cloudflare Token 输入时会正常显示。
 
 脚本会自动识别 Cloudflare Zone，不需要手动填写 Zone ID。
+
+如果能自动获取服务器公网 IPv4，脚本还会核对 Cloudflare 的 A 记录是否确实指向当前服务器；发现指向错误时会停止部署并提示正确 IPv4。
 
 部署完成后会显示完整访问地址，例如：
 
@@ -246,6 +246,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/ma
 
 如果服务器有多套 Sub-Store，脚本会先列出所有实例，再让你选择要操作哪一套。
 
+管理脚本也会检查自身需要的基础命令；缺少时会在 Debian / Ubuntu 上自动补齐。
+
 ---
 
 # 更新 Sub-Store
@@ -267,8 +269,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/ma
 更新过程会自动：
 
 1. 读取原来的端口、数据目录、后端路径和同步定时配置
-2. 自动生成一份更新前备份
-3. 拉取最新 `xream/sub-store`
+2. 先拉取最新 `xream/sub-store`，此时原服务继续运行
+3. 镜像拉取完成后立即生成更新前备份
 4. 暂时保留旧容器作为回滚版本
 5. 启动新版本
 6. 检查真实后端 API：
@@ -486,6 +488,8 @@ DELETE
 ```
 
 才会继续。
+
+完全卸载会先检查数据目录是否属于本教程默认目录，检查通过后才允许继续删除。
 
 完全卸载会删除：
 
