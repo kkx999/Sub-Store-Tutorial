@@ -5,11 +5,18 @@ if [ "${EUID:-$(id -u)}" -ne 0 ]; then echo "请使用 root 用户运行此脚�
 if ! command -v apt-get >/dev/null 2>&1; then echo "当前脚本仅支持 Debian / Ubuntu。"; exit 1; fi
 if ! command -v systemctl >/dev/null 2>&1; then echo "未检测到 systemctl，当前脚本需要标准 Debian / Ubuntu VPS。"; exit 1; fi
 
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y curl ca-certificates jq tar gzip coreutils grep sed gawk nginx >/dev/null
-for c in curl jq tar gzip awk grep sed sort head wc cp mktemp seq nginx; do
-  command -v "$c" >/dev/null 2>&1 || { echo "缺少命令：$c"; exit 1; }
+NEED_DEPS=0
+for c in curl wget sudo jq tar gzip nginx awk grep sed sort head wc cut cp mv rm chmod chown mktemp date seq ls mkdir sleep ln; do
+  command -v "$c" >/dev/null 2>&1 || { NEED_DEPS=1; break; }
+done
+if [ "$NEED_DEPS" -eq 1 ]; then
+  echo "检测到缺少基础命令，正在自动补齐..."
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y curl wget sudo ca-certificates jq tar gzip coreutils grep sed gawk nginx >/dev/null
+fi
+for c in curl wget sudo jq tar gzip nginx awk grep sed sort head wc cut cp mv rm chmod chown mktemp date seq ls mkdir sleep ln; do
+  command -v "$c" >/dev/null 2>&1 || { echo "依赖安装后仍缺少命令：$c"; exit 1; }
 done
 command -v docker >/dev/null 2>&1 || { echo "未检测到 Docker，请先运行一键安装脚本。"; exit 1; }
 
@@ -49,31 +56,61 @@ make_backup(){
   running "$n" && was=1
   trap backup_cleanup EXIT; trap 'exit 130' INT TERM
   [ "$was" -eq 0 ] || { BACKUP_RESTART="$n"; docker stop "$n" >/dev/null; }
+
   tar -czf "$LAST_BACKUP" -C "$d" . || rc=$?
-  if [ "$was" -eq 1 ] && [ "$restart" -eq 1 ]; then docker start "$n" >/dev/null || { echo "备份后容器启动失败：$n"; return 1; }; BACKUP_RESTART=""; fi
-  if [ "$rc" -ne 0 ] || ! tar -tzf "$LAST_BACKUP" >/dev/null 2>&1; then rm -f "$LAST_BACKUP"; BACKUP_PARTIAL=""; trap - EXIT INT TERM; echo "备份失败或校验失败。"; return 1; fi
-  chmod 600 "$LAST_BACKUP"; BACKUP_PARTIAL=""; [ "$restart" -eq 1 ] && BACKUP_RESTART=""
-  trap - EXIT INT TERM
+  if [ "$rc" -ne 0 ] || ! tar -tzf "$LAST_BACKUP" >/dev/null 2>&1; then
+    rm -f "$LAST_BACKUP"; BACKUP_PARTIAL=""
+    if [ "$was" -eq 1 ]; then docker start "$n" >/dev/null 2>&1 || true; fi
+    BACKUP_RESTART=""; trap - EXIT INT TERM
+    echo "备份失败或校验失败，已尽量恢复原运行状态。"
+    return 1
+  fi
+
+  chmod 600 "$LAST_BACKUP"
+  if [ "$was" -eq 1 ] && [ "$restart" -eq 1 ]; then
+    docker start "$n" >/dev/null || { echo "备份后容器启动失败：$n"; return 1; }
+  fi
+  BACKUP_RESTART=""; BACKUP_PARTIAL=""; trap - EXIT INT TERM
 }
 
 restore_archive(){
-  local f="$1" target="$2" st listing
+  local f="$1" target="$2" st listing failed=""
   tar -tzf "$f" >/dev/null 2>&1 || return 1
   listing="$(tar -tzf "$f")"
   printf '%s\n' "$listing" | grep -Eq '(^/|(^|/)\.\.(/|$))' && return 1
-  st="$(mktemp -d /tmp/sub-store-archive.XXXXXX)" || return 1; mkdir -p "$st/data"
+  st="$(mktemp -d /tmp/sub-store-update-rollback.XXXXXX)" || return 1
+  mkdir -p "$st/data"
   tar -xzf "$f" -C "$st/data" || { rm -rf "$st"; return 1; }
-  rm -rf "$target"; mkdir -p "$target"; cp -a "$st/data"/. "$target"/; rm -rf "$st"
+
+  if [ -e "$target" ]; then
+    failed="${target}.failed-update-$(date +%Y%m%d-%H%M%S)"
+    mv "$target" "$failed" || { rm -rf "$st"; return 1; }
+  fi
+  if mv "$st/data" "$target"; then
+    if [ -n "$failed" ] && [ -e "$failed" ]; then
+      chmod --reference="$failed" "$target" 2>/dev/null || true
+      chown --reference="$failed" "$target" 2>/dev/null || true
+      rm -rf "$failed"
+    fi
+    rm -rf "$st"
+    return 0
+  fi
+
+  rm -rf "$target" "$st"
+  [ -z "$failed" ] || mv "$failed" "$target" >/dev/null 2>&1 || true
+  return 1
 }
 
 update_cleanup(){
   [ "$UP_ACTIVE" -eq 1 ] || return 0
   echo; echo "更新未完成，正在自动回滚..."
-  docker rm -f "$UP_NAME" >/dev/null 2>&1 || true
-  if [ -f "$UP_BACKUP" ]; then
-    restore_archive "$UP_BACKUP" "$UP_DATA" && echo "更新前数据已恢复。" || echo "警告：数据自动恢复失败，请保留备份：$UP_BACKUP"
+  if docker inspect "$UP_OLD" >/dev/null 2>&1; then
+    docker rm -f "$UP_NAME" >/dev/null 2>&1 || true
+    if [ -f "$UP_BACKUP" ]; then
+      restore_archive "$UP_BACKUP" "$UP_DATA" && echo "更新前数据已恢复。" || echo "警告：数据自动恢复失败，请保留备份：$UP_BACKUP"
+    fi
+    docker rename "$UP_OLD" "$UP_NAME" >/dev/null 2>&1 || true
   fi
-  docker inspect "$UP_OLD" >/dev/null 2>&1 && docker rename "$UP_OLD" "$UP_NAME" >/dev/null 2>&1 || true
   [ "$UP_WAS_RUNNING" -eq 0 ] || docker start "$UP_NAME" >/dev/null 2>&1 || true
 }
 do_update(){
