@@ -328,7 +328,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/ma
 /root/sub-store-2-backup-20260902-022000.tar.gz
 ```
 
-备份文件保存在：
+备份文件统一保存在：
 
 ```text
 /root/
@@ -336,87 +336,28 @@ bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/ma
 
 新的备份格式只保存 Sub-Store 的持久化数据内容，所以备份可以恢复到你选择的任意 Sub-Store 实例，不要求“第二套备份只能恢复到第二套”。
 
-旧版 README 生成的：
-
-```text
-sub-store-backup-xxxx.tar.gz
-sub-store-2-backup-xxxx.tar.gz
-```
-
-管理脚本也会尽量自动兼容。
+旧版 README 生成的备份，管理脚本也会尽量自动兼容。
 
 ---
 
-# 怎么下载备份到自己的电脑
+# 下载备份
 
-备份成功后，管理脚本会直接给出 `scp` 示例。
-
-例如备份文件：
-
-```text
-/root/sub-store-backup-20260902-021800.tar.gz
-```
-
-在 **自己的电脑终端 / PowerShell** 执行：
-
-```bash
-scp root@服务器IP:/root/sub-store-backup-20260902-021800.tar.gz .
-```
-
-如果 SSH 不是默认 `22` 端口，例如 `2222`：
-
-```bash
-scp -P 2222 root@服务器IP:/root/sub-store-backup-20260902-021800.tar.gz .
-```
-
-最后面的：
-
-```text
-.
-```
-
-表示保存到电脑当前目录。
-
-如果使用手机，可以使用支持 **SFTP** 的 SSH 工具连接服务器，进入：
+使用自己的 SFTP / SSH 文件管理工具连接服务器，进入：
 
 ```text
 /root/
 ```
 
-找到对应 `.tar.gz` 文件下载到手机。
-
-建议确认备份已经下载到自己的设备后，再清理服务器上的旧备份。
-
----
-
-# 怎么把备份上传回服务器
-
-如果以后需要恢复，在自己的电脑终端 / PowerShell 执行：
-
-```bash
-scp sub-store-backup-20260902-021800.tar.gz root@服务器IP:/root/
-```
-
-非 22 SSH 端口，例如 `2222`：
-
-```bash
-scp -P 2222 sub-store-backup-20260902-021800.tar.gz root@服务器IP:/root/
-```
-
-手机同样可以通过 SFTP 上传到：
-
-```text
-/root/
-```
+找到对应的 `.tar.gz` 备份文件，直接下载到电脑或手机即可。
 
 ---
 
 # 恢复备份
 
-先确保备份文件已经上传到服务器，例如：
+先把要恢复的 `.tar.gz` 备份文件放到服务器：
 
 ```text
-/root/sub-store-backup-20260902-021800.tar.gz
+/root/
 ```
 
 然后运行：
@@ -477,7 +418,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/kkx999/Sub-Store-Tutorial/ma
 1. 先给新服务器准备 Cloudflare 域名
 2. 使用一键安装脚本部署一套新的 Sub-Store
 3. 确认新服务器 HTTPS 和 Sub-Store 可以正常打开
-4. 把旧服务器的 `.tar.gz` 备份上传到新服务器 `/root/`
+4. 把旧备份文件放到新服务器 `/root/`
 5. 运行 `manage.sh`
 6. 选择 `恢复备份`
 7. 选择新服务器上的目标实例
